@@ -1,4 +1,6 @@
 ﻿config.json
-/.vs/DiscordBoostRoleBot
+/.vs
 /obj
 *.user
+/bin
+/Properties
