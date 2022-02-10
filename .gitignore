@@ -4,3 +4,11 @@
 *.user
 /bin
 /Properties
+*.gif
+*.jpg
+*.png
+*.db
+*.db-shm
+*.db-wal
+/TestFilepng
+*.json
