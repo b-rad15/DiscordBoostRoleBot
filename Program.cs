@@ -1,5 +1,6 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using Humanizer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,8 +13,11 @@ using Remora.Discord.Hosting.Extensions;
 using Remora.Results;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
+using Remora.Discord.API.Abstractions.Results;
+using Remora.Discord.API.Objects;
 using Remora.Discord.Rest.Extensions;
 using Remora.Rest.Core;
+using Remora.Rest.Results;
 using SQLitePCL;
 
 namespace DiscordBoostRoleBot
@@ -162,25 +166,39 @@ namespace DiscordBoostRoleBot
             return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
         }
 
-        internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake guildId)
+        internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake serverId)
         {
             List<Snowflake> peopleRemoved = new();
-            Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(guildId, checkIsBoosting: true).ConfigureAwait(false);
+            Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(serverId, checkIsBoosting: true).ConfigureAwait(false);
             if (!guildBoostersResult.IsSuccess)
             {
-                log.LogError("Could not get guild members for guild {guild} because {reason}", guildId, guildBoostersResult.Error.Message);
+                log.LogError("Could not get guild members for guild {guild} because {reason}", serverId, guildBoostersResult.Error.Message);
                 return Result<List<Snowflake>>.FromError(guildBoostersResult.Error);
             }
 
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
             await using Database.RoleDataDbContext database = new();
-            List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == guildId.Value).ToListAsync().ConfigureAwait(false);
+            List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync().ConfigureAwait(false);
             foreach (Database.RoleData roleCreated in rolesCreatedForGuild.Where(roleCreated => guildBoosters.All(gb => roleCreated.RoleUserId != gb.User.Value.ID.Value)))
             {
-                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(guildId, new Snowflake(roleCreated.RoleId)).ConfigureAwait(false);
+                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(serverId, new Snowflake(roleCreated.RoleId)).ConfigureAwait(false);
                 if (!delRoleResult.IsSuccess)
                 {
-                    log.LogError("Failed to delete role {role} because {error}", roleCreated.RoleId, delRoleResult.Error.Message);
+                    if (delRoleResult.Error is RestResultError<RestError> restError)
+                    {
+                        if (restError.Error.Code == DiscordError.UnknownRole)
+                        {
+                            log.LogDebug("Role {role} was deleted without using the database, tell {server} not to do that pls", roleCreated.RoleId, serverId);
+                        }
+                        else
+                        {
+                            log.LogError("Rest error deleting role {role} because reason {reason}", roleCreated.RoleId, restError.Error.Code.Humanize(LetterCasing.Title));
+                        }
+                    }
+                    else
+                    {
+                        log.LogError("Failed to delete role {role} because {error}", roleCreated.RoleId, delRoleResult.Error.Message);
+                    }
                 }
                 database.Remove(roleCreated);
                 peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
