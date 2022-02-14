@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Rest.Core;
+using Z.EntityFramework.Plus;
 
 namespace DiscordBoostRoleBot
 {
@@ -58,7 +59,7 @@ namespace DiscordBoostRoleBot
                     }
                     foreach (Snowflake userRemoved in usersRemoved)
                     {
-                        await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteFromQueryAsync(cancellationToken: stoppingToken);
+                        await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(cancellationToken: stoppingToken);
                         _logger.LogDebug("\tRemoved user {userMention}", userRemoved.User());
                     }
                 }
