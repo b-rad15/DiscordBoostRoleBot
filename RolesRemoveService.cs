@@ -5,7 +5,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
-using EFCore.BulkExtensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -59,7 +58,7 @@ namespace DiscordBoostRoleBot
                     }
                     foreach (Snowflake userRemoved in usersRemoved)
                     {
-                        await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).BatchDeleteAsync(cancellationToken: stoppingToken);
+                        await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteFromQueryAsync(cancellationToken: stoppingToken);
                         _logger.LogDebug("\tRemoved user {userMention}", userRemoved.User());
                     }
                 }
