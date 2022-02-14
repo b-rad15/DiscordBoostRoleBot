@@ -138,9 +138,9 @@ namespace DiscordBoostRoleBot
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
             if ((_context.User.ID != assign_to_member.User.Value.ID || assign_to_member.IsNotBoosting()) && !executorGuildMember.IsModAdminOrOwner())
             {
-                if (await Database.GetRoleCount(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value) > 0)
+                if (await Database.GetRoleCount(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value).ConfigureAwait(false) > 0)
                 {
-                    return await SendErrorReply("You are only allowed one booster role on this server");
+                    return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
                 }
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"You do not have the required permissions to create this role for {assign_to_member.Mention()}, not boosting and don't have ManageRoles mod permissions").ConfigureAwait(false);
@@ -181,7 +181,7 @@ namespace DiscordBoostRoleBot
             if (image_url is not null)
             {
                 IResult? makeNewRole;
-                (iconStream, iconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: image_url);
+                (iconStream, iconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: image_url).ConfigureAwait(false);
                 if (iconStream is null)
                     return makeNewRole;
             }
@@ -197,7 +197,7 @@ namespace DiscordBoostRoleBot
             }
             IRole role = roleResult.Entity;
             bool addedToDb = await Database.AddRoleToDatabase(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value,
-                role.ID.Value, color, role.Name);
+                role.ID.Value, color, role.Name).ConfigureAwait(false);
             if (!addedToDb)
             {
                 _log.LogError($"Could not add role to database");
@@ -220,18 +220,18 @@ namespace DiscordBoostRoleBot
             }
 
             string msg = "";
-            Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildAPI.GetGuildRolesAsync(_context.GuildID.Value, ct: this.CancellationToken);
+            Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildAPI.GetGuildRolesAsync(_context.GuildID.Value, ct: this.CancellationToken).ConfigureAwait(false);
             if (getRolesResult.IsSuccess)
             {
                 IReadOnlyList<IRole> guildRoles = getRolesResult.Entity;
                 Result<IUser> currentBotUserResult =
-                    await _restUserAPI.GetCurrentUserAsync(ct: this.CancellationToken);
+                    await _restUserAPI.GetCurrentUserAsync(ct: this.CancellationToken).ConfigureAwait(false);
                 if (currentBotUserResult.IsSuccess)
                 {
                     IUser currentBotUser = currentBotUserResult.Entity;
                     Result<IGuildMember> currentBotMemberResult =
                         await _restGuildAPI.GetGuildMemberAsync(_context.GuildID.Value, currentBotUser.ID,
-                            this.CancellationToken);
+                            this.CancellationToken).ConfigureAwait(false);
                     if (currentBotMemberResult.IsSuccess)
                     {
                         IGuildMember currentBotMember = currentBotMemberResult.Entity;
@@ -289,7 +289,7 @@ namespace DiscordBoostRoleBot
             byte[]? imgData;
             if (Base64Regex.IsMatch(input: dataUri))
             {
-                return (null, null, await SendErrorReply("This is not a url, give an image URL"));
+                return (null, null, await SendErrorReply("This is not a url, give an image URL").ConfigureAwait(false));
             }
 
             Result<IReadOnlyList<IMessage>> errResponse;
@@ -326,7 +326,6 @@ namespace DiscordBoostRoleBot
             // _log.LogInformation("Data Stream : {stream}", new MemoryStream(Encoding.UTF8.GetBytes(dataUri)).);
             // iconStream = new MemoryStream(Encoding.UTF8.GetBytes(s: dataUri));
             // BitConverter.GetBytes(9894494448401390090).CopyTo(imgData, 0);
-            await File.WriteAllBytesAsync("TestFile" + imageFormat.FileExtensions.First(), imgData);
             iconStream = new MemoryStream(imgData);
 
             return (iconStream, imageFormat, null);
@@ -366,15 +365,15 @@ namespace DiscordBoostRoleBot
 
             if (!delete_role && !member.IsModAdminOrOwner())
             {
-                return await SendErrorReply("Only mods are allowed to untrack a role without deleting it");
+                return await SendErrorReply("Only mods are allowed to untrack a role without deleting it").ConfigureAwait(false);
             }
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
             if (_context.User.ID != member.User.Value.ID && !member.IsModAdminOrOwner())
             {
-                return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles");
+                return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
-            (int result, ulong ownerId) = await Database.RemoveRoleFromDatabase(role);
+            (int result, ulong ownerId) = await Database.RemoveRoleFromDatabase(role).ConfigureAwait(false);
             Result<IReadOnlyList<IMessage>> replyResult;
             switch (result)
             {
@@ -382,7 +381,7 @@ namespace DiscordBoostRoleBot
                 {
                     replyResult = await _feedbackService.SendContextualErrorAsync(
                         $"Role {role.Mention()} not found in database, make sure it was created using the bot or added using /track-role",
-                        ct: this.CancellationToken);
+                        ct: this.CancellationToken).ConfigureAwait(false);
                     return !replyResult.IsSuccess
                         ? Result.FromError(replyResult)
                         : Result.FromSuccess();
@@ -392,7 +391,7 @@ namespace DiscordBoostRoleBot
                     _log.LogWarning($"Role {role.Mention()} could not be removed from database");
                     replyResult = await _feedbackService.SendContextualErrorAsync(
                         $"Role {role.Mention()} could not be removed from database, try again later",
-                        ct: this.CancellationToken);
+                        ct: this.CancellationToken).ConfigureAwait(false);
                     return !replyResult.IsSuccess
                         ? Result.FromError(replyResult)
                         : Result.FromSuccess();
@@ -401,28 +400,28 @@ namespace DiscordBoostRoleBot
                 {
                     replyResult = await _feedbackService.SendContextualSuccessAsync(
                         $"Role {role.Mention()} untracked successfully",
-                        ct: this.CancellationToken);
+                        ct: this.CancellationToken).ConfigureAwait(false);
                     if (!replyResult.IsSuccess)
                         return Result.FromError(replyResult);
                     if (!delete_role) 
                         return Result.FromSuccess();
-                    Result removeRoleResult = await _restGuildAPI.RemoveGuildMemberRoleAsync(_context.GuildID.Value, new Snowflake(ownerId), role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken);
+                    Result removeRoleResult = await _restGuildAPI.RemoveGuildMemberRoleAsync(_context.GuildID.Value, new Snowflake(ownerId), role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken).ConfigureAwait(false);
                     if (!removeRoleResult.IsSuccess)
                     {
                         _log.LogError("Could not remove role {role} : {roleMention} from member {memberId} because {error}", role.Name,
                             role.Mention(), ownerId, removeRoleResult.Error);
                     }
-                    Result deleteResult = await _restGuildAPI.DeleteGuildRoleAsync(_context.GuildID.Value, role.ID, reason: $"User requested deletion", ct: this.CancellationToken);
+                    Result deleteResult = await _restGuildAPI.DeleteGuildRoleAsync(_context.GuildID.Value, role.ID, reason: $"User requested deletion", ct: this.CancellationToken).ConfigureAwait(false);
                     if (!deleteResult.IsSuccess)
                     {
                         _log.LogError("Could not remove role {role} : {roleMention} because {error}", role.Name,
                             role.Mention(), deleteResult.Error);
-                        return await SendErrorReply($"Could not remove role {role.Mention()}, remove it manually");
+                        return await SendErrorReply($"Could not remove role {role.Mention()}, remove it manually").ConfigureAwait(false);
                     }
 
                     replyResult =
                         await _feedbackService.SendContextualSuccessAsync(
-                            $"Deleted role {role.Name} : {role.Mention()} from server");
+                            $"Deleted role {role.Name} : {role.Mention()} from server").ConfigureAwait(false);
                     return replyResult.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(replyResult);
@@ -432,7 +431,7 @@ namespace DiscordBoostRoleBot
                     _log.LogCritical($"Role {role.Mention()} removed multiple times from the database, somehow, oh no");
                     replyResult = await _feedbackService.SendContextualErrorAsync(
                         $"Role {role.Mention()} removed multiple times from the database, somehow, oh no",
-                        ct: this.CancellationToken);
+                        ct: this.CancellationToken).ConfigureAwait(false);
                     return !replyResult.IsSuccess
                         ? Result.FromError(replyResult)
                         : Result.FromSuccess();
@@ -444,10 +443,10 @@ namespace DiscordBoostRoleBot
         public async Task<IResult> TrackRole([Description("The role to track")] IRole role,
             [Description("If this role has no members, assign it to this user")] IUser? new_owner = null)
         {
-            Database.RoleDataDbContext database = new();
-            if (await database.RolesCreated.Where(rd => rd.RoleId == role.ID.Value).AnyAsync())
+            await using Database.RoleDataDbContext database = new();
+            if (await database.RolesCreated.Where(rd => rd.RoleId == role.ID.Value).AnyAsync().ConfigureAwait(false))
             {
-                return await SendErrorReply("This role is already being tracked");
+                return await SendErrorReply("This role is already being tracked").ConfigureAwait(false);
             }
             IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
@@ -481,9 +480,9 @@ namespace DiscordBoostRoleBot
             //Boosters are not allowed this perm due to the off chance 1 boosting member claims a (non-booster) role where they 
             if (!executorGuildMember.IsModAdminOrOwner())
             {
-                if (await Database.GetRoleCount(_context.GuildID.Value.Value, executorGuildMember.User.Value.ID.Value) > 0 && !executorGuildMember.IsModAdminOrOwner())
+                if (await Database.GetRoleCount(_context.GuildID.Value.Value, executorGuildMember.User.Value.ID.Value).ConfigureAwait(false) > 0 && !executorGuildMember.IsModAdminOrOwner())
                 {
-                    return await SendErrorReply("You are only allowed one booster role on this server");
+                    return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
                 }
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"You do not have the required permissions to create this role for {executorGuildMember.Mention()}, you don't have ManageRoles mod permissions").ConfigureAwait(false);
@@ -494,15 +493,16 @@ namespace DiscordBoostRoleBot
 
             //Check role meets criteria to be added
             List<IGuildMember> membersList = new();
+            Result<List <IGuildMember>> membersListResult;
             Optional<Snowflake> lastGuildMemberSnowflake = default;
             while (true)
             {
                 Result<IReadOnlyList<IGuildMember>> getMembersResult =
-                    await _restGuildAPI.ListGuildMembersAsync(_context.GuildID.Value, limit: 1000, after: lastGuildMemberSnowflake);
+                    await _restGuildAPI.ListGuildMembersAsync(_context.GuildID.Value, limit: 1000, after: lastGuildMemberSnowflake).ConfigureAwait(false);
                 if (!getMembersResult.IsSuccess)
                 {
                     return await SendErrorReply(
-                        "Could not find how many have this role, invalid. Try again or recreate this role using the bot if necessary.");
+                        "Could not find how many have this role, invalid. Try again or recreate this role using the bot if necessary.").ConfigureAwait(false);
                 }
                 
                 if (getMembersResult.Entity.Any())
@@ -521,23 +521,23 @@ namespace DiscordBoostRoleBot
             {
                 //TODO: handle when new_owner specified but different member found with role
                 case > 1:
-                    return await SendErrorReply("More than 1 member has this role, cannot add to the bot");
+                    return await SendErrorReply("More than 1 member has this role, cannot add to the bot").ConfigureAwait(false);
                 case 1:
                     ownerMemberSnowflake = membersList.First().User.Value.ID;
                     break;
                 case 0:
                     if (new_owner is null)
                     {
-                        return await SendErrorReply("No user has this role; Add a user or specify one in this command before tracking it");
+                        return await SendErrorReply("No user has this role; Add a user or specify one in this command before tracking it").ConfigureAwait(false);
                     }
 
                     ownerMemberSnowflake = new_owner.ID;
                     Result addRoleResult = await _restGuildAPI.AddGuildMemberRoleAsync(_context.GuildID.Value,
                         ownerMemberSnowflake, role.ID,
-                        reason: $"User added role when starting tracking");
+                        reason: $"User added role when starting tracking").ConfigureAwait(false);
                     if (!addRoleResult.IsSuccess)
                     {
-                        return await SendErrorReply($"No user has this role and the bot failed to add {new_owner.Mention()}");
+                        return await SendErrorReply($"No user has this role and the bot failed to add {new_owner.Mention()}").ConfigureAwait(false);
                     }
                     break;
             }
@@ -550,9 +550,9 @@ namespace DiscordBoostRoleBot
                 ServerId = _context.GuildID.Value.Value,
                 RoleUserId = ownerMemberSnowflake.Value
             };
-            await database.RolesCreated.AddAsync(roleData);
-            await database.SaveChangesAsync();
-            return await SendSuccessReply($"Successfully started tracking {role.Mention()}, you can now modify it via bot commands");
+            await database.RolesCreated.AddAsync(roleData).ConfigureAwait(false);
+            await database.SaveChangesAsync().ConfigureAwait(false);
+            return await SendSuccessReply($"Successfully started tracking {role.Mention()}, you can now modify it via bot commands").ConfigureAwait(false);
         }
 
         [Command("modify-role")]
@@ -565,7 +565,7 @@ namespace DiscordBoostRoleBot
         {
             if (new_name == null && new_color_string == null && new_image == null)
             {
-                return await SendErrorReply("You must specify at least one property of the role to change");
+                return await SendErrorReply("You must specify at least one property of the role to change").ConfigureAwait(false);
             }
             //Check Server Member has permissions to use command
             IGuildMember member;
@@ -596,15 +596,15 @@ namespace DiscordBoostRoleBot
             }
             await using Database.RoleDataDbContext database = new();
             Database.RoleData? roleData = await database.RolesCreated
-                .Where(rd => _context.GuildID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync();
+                .Where(rd => _context.GuildID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (roleData == null)
             {
-                return await SendErrorReply("Role not found in database, check that this command is tracking it");
+                return await SendErrorReply("Role not found in database, check that this command is tracking it").ConfigureAwait(false);
             }
             //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
             if (_context.User.ID != member.User.Value.ID && !member.IsModAdminOrOwner())
             {
-                return await SendErrorReply("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles");
+                return await SendErrorReply("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
 
             //Handle Name Change
@@ -638,7 +638,7 @@ namespace DiscordBoostRoleBot
                 modifyRoleResult = await _restGuildAPI.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
-                    reason: $"Member requested to modify role");
+                    reason: $"Member requested to modify role").ConfigureAwait(false);
             }
             else if (isUnicodeOrEmoji(new_image))
             {
@@ -646,25 +646,25 @@ namespace DiscordBoostRoleBot
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     unicodeEmoji: new_image,
-                    reason: $"Member requested to modify role");
+                    reason: $"Member requested to modify role").ConfigureAwait(false);
             } else
             {
                 //Get guild info to tell premium tier
-                Result<IGuild> getGuildResult = await _restGuildAPI.GetGuildAsync(_context.GuildID.Value);
+                Result<IGuild> getGuildResult = await _restGuildAPI.GetGuildAsync(_context.GuildID.Value).ConfigureAwait(false);
                 if (!getGuildResult.IsSuccess)
                 {
-                    return await SendErrorReply("Could not get info about the guild you are in, try again later");
+                    return await SendErrorReply("Could not get info about the guild you are in, try again later").ConfigureAwait(false);
                 }
 
                 if (getGuildResult.Entity.PremiumTier < PremiumTier.Tier2)
                 {
                     return await SendErrorReply(
-                        $"Server must be boosted at least to tier 2 before adding role icons.\n{7 - getGuildResult.Entity.PremiumSubscriptionCount.Value} more boost needed");
+                        $"Server must be boosted at least to tier 2 before adding role icons.\n{7 - getGuildResult.Entity.PremiumSubscriptionCount.Value} more boost needed").ConfigureAwait(false);
                 }
 
                 IResult? makeNewRole;
                 MemoryStream? newIconStream = null;
-                (newIconStream, newIconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: new_image);
+                (newIconStream, newIconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: new_image).ConfigureAwait(false);
                 if (newIconStream is null)
                 {
                     //If this is null, there was no error so just assume image not valid
@@ -677,7 +677,7 @@ namespace DiscordBoostRoleBot
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     icon: newIconStream ?? default(Optional<Stream?>),
-                    reason: $"Member requested to modify role");
+                    reason: $"Member requested to modify role").ConfigureAwait(false);
             
             }
 
@@ -694,27 +694,27 @@ namespace DiscordBoostRoleBot
                 if (modifyRoleResult.Error.Message == "Unknown or unsupported image format.")
                 {
                     return await SendErrorReply(
-                        $"format {newIconFormat.Name} rejected by discord please convert to JPG or PNG");
+                        $"format {newIconFormat.Name} rejected by discord please convert to JPG or PNG").ConfigureAwait(false);
                 }
                 replyResult = await _feedbackService.SendContextualSuccessAsync(
-                    $"Could not modify {role.Mention()} check that the bot has the correct permissions");
+                    $"Could not modify {role.Mention()} check that the bot has the correct permissions").ConfigureAwait(false);
                 return replyResult.IsSuccess
                     ? Result.FromSuccess()
                     : Result.FromError(replyResult);
             }
             //If we changed db items and didn't save to the db
-            if ((new_name is not null || new_color_string is not null) && await database.SaveChangesAsync() < 1)
+            if ((new_name is not null || new_color_string is not null) && await database.SaveChangesAsync().ConfigureAwait(false) < 1)
             {
                 //TODO: Change role back or queue a later write to the database
                 replyResult = await _feedbackService.SendContextualSuccessAsync(
-                    $"Could not modify database for {modifyRoleResult.Entity.Mention()}, try again later");
+                    $"Could not modify database for {modifyRoleResult.Entity.Mention()}, try again later").ConfigureAwait(false);
                 return replyResult.IsSuccess
                     ? Result.FromSuccess()
                     : Result.FromError(replyResult);
             }
 
             replyResult = await _feedbackService.SendContextualSuccessAsync(
-                $"Successfully modified role {modifyRoleResult.Entity.Mention()}");
+                $"Successfully modified role {modifyRoleResult.Entity.Mention()}").ConfigureAwait(false);
             return replyResult.IsSuccess
                 ? Result.FromSuccess()
                 : Result.FromError(replyResult);
@@ -742,12 +742,18 @@ namespace DiscordBoostRoleBot
                 : Result.FromError(result: errResponse);
         }
 
-        // [Command("check-boosting")]
+        [Command("who-boosting")]
         [Description("Prints who is and is not boosting")]
-        public async Task<IResult> CheckBoosting()
+        public async Task<IResult> WhoBoosting()
         {
-            string msg = await Program.CheckBoosting(server: _context.GuildID.Value, _restGuildAPI: _restGuildAPI).ConfigureAwait(false);
+            Result<IEnumerable<IGuildMember>> getGuildMembersResult = await Program.GetGuildMembers(_context.GuildID.Value, checkIsBoosting:true).ConfigureAwait(false);
+            if (!getGuildMembersResult.IsSuccess)
+            {
+                _log.LogError("Failed to getGuildMembers because {error}", getGuildMembersResult.Error.Message);
+                return await SendErrorReply(getGuildMembersResult.Error.Message).ConfigureAwait(false);
+            }
 
+            string msg = string.Concat("\n", getGuildMembersResult.Entity.Select(gm => gm.Mention()));
             Result<IReadOnlyList<IMessage>> reply = await _feedbackService.SendContextualSuccessAsync(contents: msg, ct: this.CancellationToken).ConfigureAwait(false);
             return !reply.IsSuccess
                 ? Result.FromError(result: reply)
@@ -766,7 +772,7 @@ namespace DiscordBoostRoleBot
             }
         }
 
-        public static string SpacingSequence(int indentLevel) => "\u221F" + string.Concat(Enumerable.Repeat("", indentLevel));
+        public static string SpacingSequence(int indentLevel) => "\u02ea" + string.Concat(Enumerable.Repeat("\u02cd", indentLevel));
 
         [Command("help")]
         [Description("Print the help message for Boost Role Manager")]
@@ -822,7 +828,7 @@ namespace DiscordBoostRoleBot
             if (!embedHelpResult.IsSuccess)
             {
                 _log.LogError("Failed to validate embed {error}", embedHelpResult.Error.Message);
-                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualContentAsync(helpString, Color.RebeccaPurple, ct:this.CancellationToken);
+                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualContentAsync(helpString, Color.RebeccaPurple, ct:this.CancellationToken).ConfigureAwait(false);
                 return replyEmbedErrorResult.IsSuccess
                     ? embedHelpResult
                     : Result.FromError(replyEmbedErrorResult);
@@ -831,20 +837,20 @@ namespace DiscordBoostRoleBot
             if (!embedHelpBuildResult.IsSuccess)
             {
                 _log.LogError("Failed to build embed {error}", embedHelpBuildResult.Error.Message);
-                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualSuccessAsync(helpString, ct: this.CancellationToken);
+                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualSuccessAsync(helpString, ct: this.CancellationToken).ConfigureAwait(false);
                 return replyEmbedErrorResult.IsSuccess
                     ? embedHelpBuildResult
                     : Result.FromError(replyEmbedErrorResult);
             }
 
-            Result<IMessage> replyResult = await _feedbackService.SendContextualEmbedAsync(embedHelpBuildResult.Entity);
+            Result<IMessage> replyResult = await _feedbackService.SendContextualEmbedAsync(embedHelpBuildResult.Entity).ConfigureAwait(false);
             if (replyResult.IsSuccess)
             {
                 return Result.FromSuccess();
             }
 
             _log.LogError("Error making help embed {error}", replyResult.Error.Message);
-            Result<IReadOnlyList<IMessage>> replyEmbedErrorFinalResult = await _feedbackService.SendContextualInfoAsync(helpString);
+            Result<IReadOnlyList<IMessage>> replyEmbedErrorFinalResult = await _feedbackService.SendContextualInfoAsync(helpString).ConfigureAwait(false);
             return replyEmbedErrorFinalResult.IsSuccess
                 ? Result.FromError(embedHelpBuildResult)
                 : Result.FromError(replyEmbedErrorFinalResult);
@@ -855,7 +861,7 @@ namespace DiscordBoostRoleBot
         [Description("Get the link to the Github Repo for Discord Music Recs")]
         public async Task<IResult> GetGithubLink()
         {
-            return await _feedbackService.SendContextualSuccessAsync($"View the source code on [Github]({GithubLink})");
+            return await _feedbackService.SendContextualSuccessAsync($"View the source code on [Github]({GithubLink})").ConfigureAwait(false);
         }
 
         private static readonly string[] DonateLinks = { "https://ko-fi.com/bradocon" };
@@ -863,7 +869,7 @@ namespace DiscordBoostRoleBot
         [Description("Prints all links to donate to the bot owner")]
         public async Task<IResult> GetDonateLinks()
         {
-            return await _feedbackService.SendContextualSuccessAsync($"Support the dev on ko-fi {DonateLinks}");
+            return await _feedbackService.SendContextualSuccessAsync($"Support the dev on ko-fi {DonateLinks}").ConfigureAwait(false);
         }
 
     }

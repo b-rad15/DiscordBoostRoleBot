@@ -48,13 +48,21 @@ namespace DiscordBoostRoleBot {
         /// </returns>
         public static string Mention(this IUser user) => user.ID.User();
         /// <summary>
-        /// Creates a mention string for a user, displaying their username.
+        /// Gets the User's name and Discriminator, like Discord would show it
         /// </summary>
         /// <param name="user">The user</param>
         /// <returns>
         /// A user mention string.
         /// </returns>
         public static string NameAndDiscriminator(this IUser user) => $"{user.Username}#{user.Discriminator}";
+        /// <summary>
+        /// Gets the User's name and Discriminator, like Discord would show it
+        /// </summary>
+        /// <param name="user">The user</param>
+        /// <returns>
+        /// A user mention string.
+        /// </returns>
+        public static string NameAndDiscriminator(this IGuildMember member) => member.User.Value.NameAndDiscriminator();
         /// <summary>
         /// Creates a mention string for a user, displaying their username.
         /// </summary>

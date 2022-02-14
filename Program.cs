@@ -1,7 +1,9 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
 using System.Diagnostics.Metrics;
+using System.Reflection.Metadata.Ecma335;
 using DiscordBoostRoleBot;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -28,7 +30,9 @@ namespace DiscordBoostRoleBot
         // Get Token from Configuration file
         internal static readonly Configuration Config = Configuration.ReadConfig();
 
-        // private static readonly IDiscordRestGuildAPI _restGuildAPI;
+        private static IDiscordRestGuildAPI? _restGuildApi;
+        public static bool IsInitialized() => _restGuildApi is not null;
+
         public static ILogger<Program> log;
         public static HttpClient httpClient = new();
 
@@ -45,7 +49,9 @@ namespace DiscordBoostRoleBot
                             .AddDiscordRest(_ => Config.Token)
                             .AddDiscordCommands(true)
                             .AddCommandTree()
-                                .WithCommandGroup<RoleCommands>();
+                                .WithCommandGroup<RoleCommands>()
+                                .Finish()
+                            .AddHostedService<RolesRemoveService>();
                         // .Finish()
                         // .AddCommandTree(nameof(EmptyCommands))
                         //     .WithCommandGroup<EmptyCommands>();
@@ -63,6 +69,7 @@ namespace DiscordBoostRoleBot
                 .Build();
             IServiceProvider? services = host.Services;
             log = services.GetRequiredService<ILogger<Program>>();
+            _restGuildApi = services.GetRequiredService<IDiscordRestGuildAPI>();
             Snowflake? debugServer = null;
             ulong? debugServerId = Config.TestServerId;
             if (debugServerId is not null)
@@ -121,45 +128,71 @@ namespace DiscordBoostRoleBot
             Console.WriteLine("Bye bye");
         }
 
-        internal static async Task<string> CheckBoosting(Snowflake server, IDiscordRestGuildAPI _restGuildAPI)
+        internal static async Task<Result<IEnumerable<IGuildMember>>> GetGuildMembers(Snowflake guildId, IRole? role = null, bool checkIsBoosting = false, bool canBeMod = true)
         {
-            Result<IReadOnlyList<IGuildMember>> membersResult = await _restGuildAPI.ListGuildMembersAsync(guildID: server).ConfigureAwait(false);
-            string messageString = string.Empty;
-            if (!membersResult.IsSuccess)
+
+            //Check role meets criteria to be added
+            List<IGuildMember> membersList = new();
+            Optional<Snowflake> lastGuildMemberSnowflake = default;
+            while (true)
             {
-                log.LogError($"ListGuildMembers failed with code {membersResult.Error}");
-                messageString += $"ListGuildMembers failed with code {membersResult.Error}";
-                IResult? err = membersResult.Inner;
-                while (err != null)
+                Result<IReadOnlyList<IGuildMember>> getMembersResult =
+                    await _restGuildApi!.ListGuildMembersAsync(guildId, limit: 1000, after: lastGuildMemberSnowflake).ConfigureAwait(false);
+                if (!getMembersResult.IsSuccess)
                 {
-                    log.LogError($"ListGuildMembers inner failed with code {membersResult.Error}");
-                    messageString += $"ListGuildMembers inner failed with code {membersResult.Error}";
-                    err = err.Inner;
+                    return Result<IEnumerable<IGuildMember>>.FromError(getMembersResult);
                 }
 
-                return messageString;
-            }
-
-            IReadOnlyList<IGuildMember> members = membersResult.Entity;
-            messageString += "Boost Report:";
-            foreach (IGuildMember member in members)
-            {
-                messageString += "\n";
-                if (member.PremiumSince.HasValue && member.PremiumSince.Value.HasValue)
+                if (getMembersResult.Entity.Any())
                 {
-                    string? message = $"{member.User.Value.ID.User()} is boosting";
-                    log.LogInformation(message: message);
-                    messageString += message;
+                    IEnumerable<IGuildMember> membersToAdd = getMembersResult.Entity;
+                    if (role is not null && checkIsBoosting)
+                    {
+                        membersToAdd = membersToAdd.Where(gm => (gm.IsBoosting() || (canBeMod && gm.IsModAdminOrOwner())) && gm.Roles.Contains(role.ID));
+                    }
+                    else if(role is not null)
+                    {
+                        membersToAdd = membersToAdd.Where(gm => gm.Roles.Contains(role.ID));
+                    }
+                    else if(checkIsBoosting)
+                    {
+                        membersToAdd = membersToAdd.Where(gm=> (gm.IsBoosting() || (canBeMod && gm.IsModAdminOrOwner())));
+                    }
+                    membersList.AddRange(membersToAdd);
+                    lastGuildMemberSnowflake = new Optional<Snowflake>(getMembersResult.Entity.Last().User.Value.ID);
                 }
                 else
                 {
-                    string? message = $"{member.User.Value.ID.User()} is not boosting";
-                    log.LogInformation(message: message);
-                    messageString += message;
+                    break;
                 }
-
             }
-            return messageString;
+            return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
+        }
+
+        internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake guildId)
+        {
+            List<Snowflake> peopleRemoved = new();
+            Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(guildId, checkIsBoosting: true).ConfigureAwait(false);
+            if (!guildBoostersResult.IsSuccess)
+            {
+                log.LogError("Could not get guild members for guild {guild} because {reason}", guildId, guildBoostersResult.Error.Message);
+                return Result<List<Snowflake>>.FromError(guildBoostersResult.Error);
+            }
+
+            IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
+            await using Database.RoleDataDbContext database = new();
+            List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == guildId.Value).ToListAsync().ConfigureAwait(false);
+            foreach (Database.RoleData roleCreated in rolesCreatedForGuild.Where(roleCreated => guildBoosters.All(gb => roleCreated.RoleUserId != gb.User.Value.ID.Value)))
+            {
+                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(guildId, new Snowflake(roleCreated.RoleId)).ConfigureAwait(false);
+                if (!delRoleResult.IsSuccess)
+                {
+                    log.LogError("Failed to delete role {role} because {error}", roleCreated.RoleId, delRoleResult.Error.Message);
+                }
+                database.Remove(roleCreated);
+                peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
+            }
+            return Result<List<Snowflake>>.FromSuccess(peopleRemoved);
         }
         /// <summary>
         /// Creates a generic application host builder.

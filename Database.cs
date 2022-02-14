@@ -79,28 +79,28 @@ namespace DiscordBoostRoleBot
                 Name = name
             };
             await using RoleDataDbContext database = new();
-            await database.AddAsync(roleData);
-            return await database.SaveChangesAsync() > 0;
+            await database.AddAsync(roleData).ConfigureAwait(false);
+            return await database.SaveChangesAsync().ConfigureAwait(false) > 0;
         }
 
         public static async Task<int> GetRoleCount(ulong serverId, ulong userId)
         {
             await using RoleDataDbContext database = new();
-            return await database.RolesCreated.CountAsync(rd => rd.RoleUserId == userId);
+            return await database.RolesCreated.CountAsync(rd => rd.RoleUserId == userId).ConfigureAwait(false);
         }
 
-        public static async Task<(int, ulong)> RemoveRoleFromDatabase(IRole role) => await RemoveRoleFromDatabase(role.ID);
-        public static async Task<(int, ulong)> RemoveRoleFromDatabase(Snowflake roleSnowflake) => await RemoveRoleFromDatabase(roleSnowflake.Value);
+        public static async Task<(int, ulong)> RemoveRoleFromDatabase(IRole role) => await RemoveRoleFromDatabase(role.ID).ConfigureAwait(false);
+        public static async Task<(int, ulong)> RemoveRoleFromDatabase(Snowflake roleSnowflake) => await RemoveRoleFromDatabase(roleSnowflake.Value).ConfigureAwait(false);
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(ulong roleId)
         {
             await using RoleDataDbContext database = new();
-            RoleData? roleToRemove = await database.RolesCreated.Where(roleData => roleData.RoleId == roleId).FirstOrDefaultAsync();
+            RoleData? roleToRemove = await database.RolesCreated.Where(roleData => roleData.RoleId == roleId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (roleToRemove is null)
             {
                 return (-1, 0);
             }
             database.RolesCreated.Remove(roleToRemove);
-            return (await database.SaveChangesAsync(), roleToRemove.RoleUserId);
+            return (await database.SaveChangesAsync().ConfigureAwait(false), roleToRemove.RoleUserId);
         }
     }
 }
