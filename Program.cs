@@ -1,8 +1,5 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
-using System.Diagnostics.Metrics;
-using System.Reflection.Metadata.Ecma335;
-using DiscordBoostRoleBot;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,17 +8,13 @@ using Microsoft.Extensions.Logging;
 using Remora.Commands.Extensions;
 using Remora.Discord.Commands.Extensions;
 using Remora.Discord.Commands.Services;
-using Remora.Discord.Gateway;
-using Remora.Discord.Gateway.Extensions;
-using Remora.Discord.Gateway.Results;
 using Remora.Discord.Hosting.Extensions;
 using Remora.Results;
-using Remora.Discord.API;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
-using Remora.Discord.Rest.API;
 using Remora.Discord.Rest.Extensions;
 using Remora.Rest.Core;
+using SQLitePCL;
 
 namespace DiscordBoostRoleBot
 {
@@ -191,6 +184,12 @@ namespace DiscordBoostRoleBot
                 }
                 database.Remove(roleCreated);
                 peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
+            }
+
+            int numRows = await database.SaveChangesAsync();
+            if (numRows != peopleRemoved.Count)
+            {
+                log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
             }
             return Result<List<Snowflake>>.FromSuccess(peopleRemoved);
         }

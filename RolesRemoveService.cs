@@ -1,15 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Remora.Discord.API.Abstractions.Rest;
 using Remora.Rest.Core;
+using Remora.Results;
 using Z.EntityFramework.Plus;
 
 namespace DiscordBoostRoleBot
@@ -38,9 +32,8 @@ namespace DiscordBoostRoleBot
                 var guildIds = await database.RolesCreated.Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
                 {
-                    guildLoopStart:
                     _logger.LogDebug("{guildId}:", guildId);
-                    var removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId);
+                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId);
                     if (!removeBoosterResult.IsSuccess)
                     {
                         if (removeBoosterResult.Error.Message.Contains("inner"))
@@ -59,7 +52,8 @@ namespace DiscordBoostRoleBot
                     }
                     foreach (Snowflake userRemoved in usersRemoved)
                     {
-                        await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(cancellationToken: stoppingToken);
+                        // Already deleted on removal
+                        // await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(stoppingToken);
                         _logger.LogDebug("\tRemoved user {userMention}", userRemoved.User());
                     }
                 }

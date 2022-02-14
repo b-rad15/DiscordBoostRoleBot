@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Drawing;
-using System.Globalization;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Remora.Commands.Attributes;
 using Remora.Commands.Groups;
@@ -16,32 +10,19 @@ using Remora.Discord.Commands.Attributes;
 using Remora.Discord.Commands.Contexts;
 using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Feedback.Services;
-using Remora.Discord.Extensions.Builder;
 using Remora.Discord.Extensions.Embeds;
-using Remora.Discord.API.Extensions;
 using Remora.Discord.Commands.Conditions;
-using Remora.Discord.Hosting.Services;
-using Remora.Discord.Rest.API;
 using Remora.Rest.Core;
 using Remora.Results;
-using SQLitePCL;
-using System.Drawing.Imaging;
-using System.Net.Mime;
-using System.Net.Security;
 using System.Reflection;
-using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Query.Internal;
-using Microsoft.Extensions.Caching.Memory;
-using Remora.Commands.Extensions;
 using Remora.Discord.API.Objects;
-using Remora.Rest.Json;
-using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using Color = System.Drawing.Color;
+using Image = SixLabors.ImageSharp.Image;
 
 namespace DiscordBoostRoleBot
 {
