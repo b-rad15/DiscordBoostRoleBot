@@ -562,6 +562,8 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(replyResult);
             }
+
+            var msg = "";
             foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 string emotePrepped = AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote);
@@ -572,17 +574,22 @@ namespace DiscordBoostRoleBot
                 {
                     _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", message.MessageID, emote, addReactionsResult.Error);
                     Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
-                        $"Could not react to message {message.MessageID} with reaction {emote} because {addReactionsResult.Error}");
+                        $"Could not react to message {message.MessageID} with reaction {emote} because {addReactionsResult.Error}", options: new FeedbackMessageOptions
+                        {
+                            MessageFlags = MessageFlags.Ephemeral
+                        });
                     return replyResult.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(replyResult);
                 }
                 _logger.LogDebug("Reacted with {reaction} to message {message}", emote, message.MessageID);
-                Result<IReadOnlyList<IMessage>> replyResult2 = await _feedbackService.SendContextualSuccessAsync(
-                    $"Reacted with {emote} to message {message.MessageID}");
-                if (!replyResult2.IsSuccess)
-                    Result.FromError(replyResult2);
+                msg += $"Reacted with {emote} to message {message.MessageID}";
             }
+
+            var respionseresult = await _feedbackService.SendContextualSuccessAsync(msg, options: new FeedbackMessageOptions
+            {
+                MessageFlags = MessageFlags.Ephemeral
+            });
             return Result.FromSuccess();
         }
     }
