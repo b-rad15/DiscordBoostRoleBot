@@ -2,6 +2,7 @@
 using DiscordBoostRoleBot;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DiscordBoostRoleBot.Migrations
 {
     [DbContext(typeof(Database.RoleDataDbContext))]
-    partial class RoleDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20220215002630_AddChannelToReactSettings")]
+    partial class AddChannelToReactSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "6.0.2");

@@ -117,7 +117,7 @@ namespace DiscordBoostRoleBot
             assign_to_member ??= executorGuildMember;
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
-            if ((_context.User.ID != assign_to_member.User.Value.ID || assign_to_member.IsNotBoosting()) && !executorGuildMember.IsModAdminOrOwner())
+            if ((_context.User.ID != assign_to_member.User.Value.ID || assign_to_member.IsNotBoosting()) && !executorGuildMember.IsRoleModAdminOrOwner())
             {
                 if (await Database.GetRoleCount(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value).ConfigureAwait(false) > 0)
                 {
@@ -261,6 +261,7 @@ namespace DiscordBoostRoleBot
                 : Result.FromSuccess();
         }
 
+        //TODO: Convert to Result<(MemoryStream?, IImageFormat?)> or something similar
         private async Task<(MemoryStream? iconStream, IImageFormat? imageFormat, IResult? makeNewRole)> ImageUrlToBase64(string imageUrl)
         {
             MemoryStream? iconStream = null;
@@ -344,13 +345,13 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
             }
 
-            if (!delete_role && !member.IsModAdminOrOwner())
+            if (!delete_role && !member.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("Only mods are allowed to untrack a role without deleting it").ConfigureAwait(false);
             }
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
-            if (_context.User.ID != member.User.Value.ID && !member.IsModAdminOrOwner())
+            if (_context.User.ID != member.User.Value.ID && !member.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
@@ -459,9 +460,9 @@ namespace DiscordBoostRoleBot
 
             //If you are not a mod/owner then deny you
             //Boosters are not allowed this perm due to the off chance 1 boosting member claims a (non-booster) role where they 
-            if (!executorGuildMember.IsModAdminOrOwner())
+            if (!executorGuildMember.IsRoleModAdminOrOwner())
             {
-                if (await Database.GetRoleCount(_context.GuildID.Value.Value, executorGuildMember.User.Value.ID.Value).ConfigureAwait(false) > 0 && !executorGuildMember.IsModAdminOrOwner())
+                if (await Database.GetRoleCount(_context.GuildID.Value.Value, executorGuildMember.User.Value.ID.Value).ConfigureAwait(false) > 0 && !executorGuildMember.IsRoleModAdminOrOwner())
                 {
                     return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
                 }
@@ -531,7 +532,7 @@ namespace DiscordBoostRoleBot
                 ServerId = _context.GuildID.Value.Value,
                 RoleUserId = ownerMemberSnowflake.Value
             };
-            await database.RolesCreated.AddAsync(roleData).ConfigureAwait(false);
+            database.RolesCreated.Add(roleData);
             await database.SaveChangesAsync().ConfigureAwait(false);
             return await SendSuccessReply($"Successfully started tracking {role.Mention()}, you can now modify it via bot commands").ConfigureAwait(false);
         }
@@ -583,7 +584,7 @@ namespace DiscordBoostRoleBot
                 return await SendErrorReply("Role not found in database, check that this command is tracking it").ConfigureAwait(false);
             }
             //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
-            if (_context.User.ID != member.User.Value.ID && !member.IsModAdminOrOwner())
+            if (_context.User.ID != member.User.Value.ID && !member.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
@@ -621,7 +622,7 @@ namespace DiscordBoostRoleBot
                     color: newRoleColor ?? default(Optional<Color?>),
                     reason: $"Member requested to modify role").ConfigureAwait(false);
             }
-            else if (isUnicodeOrEmoji(new_image))
+            else if (IsUnicodeOrEmoji(new_image))
             {
                 modifyRoleResult = await _restGuildAPI.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
@@ -701,9 +702,9 @@ namespace DiscordBoostRoleBot
                 : Result.FromError(replyResult);
         }
 
-        private static bool isUnicodeOrEmoji(string new_image)
+        private static bool IsUnicodeOrEmoji(string newImage)
         {
-            return (new_image.Length == 1 || (new_image.StartsWith(':') && new_image.EndsWith(':')));
+            return (newImage.Length == 1 || (newImage.StartsWith(':') && newImage.EndsWith(':')));
         }
 
         private async Task<IResult> SendSuccessReply(string successMessage)
@@ -722,25 +723,6 @@ namespace DiscordBoostRoleBot
                 ? Result.FromSuccess()
                 : Result.FromError(result: errResponse);
         }
-
-        [Command("who-boosting")]
-        [Description("Prints who is and is not boosting")]
-        public async Task<IResult> WhoBoosting()
-        {
-            Result<IEnumerable<IGuildMember>> getGuildMembersResult = await Program.GetGuildMembers(_context.GuildID.Value, checkIsBoosting:true).ConfigureAwait(false);
-            if (!getGuildMembersResult.IsSuccess)
-            {
-                _log.LogError("Failed to getGuildMembers because {error}", getGuildMembersResult.Error.Message);
-                return await SendErrorReply(getGuildMembersResult.Error.Message).ConfigureAwait(false);
-            }
-
-            string msg = string.Concat("\n", getGuildMembersResult.Entity.Select(gm => gm.Mention()));
-            Result<IReadOnlyList<IMessage>> reply = await _feedbackService.SendContextualSuccessAsync(contents: msg, ct: this.CancellationToken).ConfigureAwait(false);
-            return !reply.IsSuccess
-                ? Result.FromError(result: reply)
-                : Result.FromSuccess();
-        }
-
         private static IEnumerable<Type> GetAllNestedTypes(Type t)
         {
             foreach (Type nestedType in t.GetNestedTypes())
@@ -752,15 +734,16 @@ namespace DiscordBoostRoleBot
                 }
             }
         }
-
         public static string SpacingSequence(int indentLevel) => "\u02ea" + string.Concat(Enumerable.Repeat("\u02cd", indentLevel));
 
         [Command("help")]
         [Description("Print the help message for Boost Role Manager")]
         public async Task<IResult> Help()
         {
-            List<Type> slashCommandGroups = new() { GetType() }; slashCommandGroups.AddRange(GetAllNestedTypes(GetType()));
-            string helpString = "";
+            List<Type> slashCommandGroups = new() { GetType(), typeof(AddReactionsToMediaArchiveCommands) };
+            slashCommandGroups.AddRange(GetAllNestedTypes(GetType()));
+            slashCommandGroups.AddRange(GetAllNestedTypes(typeof(AddReactionsToMediaArchiveCommands)));
+            List<string> helpStrings = new(){""};
             foreach (Type slashCommandGroup in slashCommandGroups)
             {
                 string prefix = "";
@@ -778,16 +761,17 @@ namespace DiscordBoostRoleBot
                 MethodInfo[] methodInfos = slashCommandGroup.GetMethods();
                 foreach (MethodInfo methodInfo in methodInfos)
                 {
+                    string commandHelp = "";
                     CommandAttribute? slashCommandName = methodInfo.GetCustomAttribute<CommandAttribute>();
                     if (slashCommandName is null)
                     {
                         continue;
                     }
                     DescriptionAttribute? slashCommandDescription = methodInfo.GetCustomAttribute<DescriptionAttribute>();
-                    helpString += $"`/{prefix}{slashCommandName.Name}`\n";
+                    commandHelp += $"`/{prefix}{slashCommandName.Name}`\n";
                     if (slashCommandDescription != null)
                     {
-                        helpString += $"{SpacingSequence(1)}{slashCommandDescription.Description}\n";
+                        commandHelp += $"{SpacingSequence(1)}{slashCommandDescription.Description}\n";
                     }
 
                     ParameterInfo[] paramsInfo = methodInfo.GetParameters();
@@ -795,49 +779,56 @@ namespace DiscordBoostRoleBot
                     {
                         string? paramName = paramInfo.Name;
                         DescriptionAttribute? paramDesc = paramInfo.GetCustomAttribute<DescriptionAttribute>();
-                        helpString += $"{SpacingSequence(2)}`{paramName}{(paramDesc != null ? $":` {paramDesc.Description}" : '`')}\n";
+                        commandHelp += $"{SpacingSequence(2)}`{paramName}{(paramDesc != null ? $":` {paramDesc.Description}" : '`')}\n";
+                    }
+                    
+                    if (helpStrings[^1].Length + commandHelp.Length > 4096)
+                    {
+                        helpStrings.Add(commandHelp);
+                    }
+                    else
+                    {
+                        helpStrings[^1] += commandHelp;
                     }
                 }
             }
 
-            EmbedBuilder embedBuilder = new EmbedBuilder()
+            helpStrings[0] = "**Commands:**\n" + helpStrings[0];
+            IEnumerable<EmbedBuilder> embeds = helpStrings.Select(helpString => new EmbedBuilder()
                 .WithTitle("Help using Discord Boost Role Manager <:miihinotes:913303041057390644>")
-                .AddField("Commands:", helpString, false)
-                .Entity
-                .WithFooter($"GitHub: {GithubLink} | Donate: {DonateLinks[0]}");
-            Result embedHelpResult = embedBuilder.Validate();
-            if (!embedHelpResult.IsSuccess)
+                .WithDescription(helpString)
+                .WithFooter($"GitHub: {GithubLink} | Donate: {DonateLinks[0]}"));
+            foreach (EmbedBuilder embedBuilder in embeds)
             {
-                _log.LogError("Failed to validate embed {error}", embedHelpResult.Error.Message);
-                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualContentAsync(helpString, Color.RebeccaPurple, ct:this.CancellationToken).ConfigureAwait(false);
-                return replyEmbedErrorResult.IsSuccess
-                    ? embedHelpResult
-                    : Result.FromError(replyEmbedErrorResult);
-            }
-            Result<Embed> embedHelpBuildResult = embedBuilder.Build();
-            if (!embedHelpBuildResult.IsSuccess)
-            {
-                _log.LogError("Failed to build embed {error}", embedHelpBuildResult.Error.Message);
-                Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualSuccessAsync(helpString, ct: this.CancellationToken).ConfigureAwait(false);
-                return replyEmbedErrorResult.IsSuccess
-                    ? embedHelpBuildResult
-                    : Result.FromError(replyEmbedErrorResult);
+                Result embedHelpResult = embedBuilder.Validate();
+                if (!embedHelpResult.IsSuccess)
+                {
+                    _log.LogError("Failed to validate embed {error}", embedHelpResult.Error.Message);
+                    Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualContentAsync(
+                        $"***{embedBuilder.Title}***\n{string.Concat('\n', embedBuilder.Fields.Select(field => field.Name + '\n' + field.Value))}{embedBuilder.Footer}", Color.RebeccaPurple, ct: this.CancellationToken).ConfigureAwait(false);
+                }
+                Result<Embed> embedHelpBuildResult = embedBuilder.Build();
+                if (!embedHelpBuildResult.IsSuccess)
+                {
+                    _log.LogError("Failed to build embed {error}", embedHelpBuildResult.Error.Message);
+                    Result<IReadOnlyList<IMessage>> replyEmbedErrorResult = await _feedbackService.SendContextualSuccessAsync($"***{embedBuilder.Title}***\n{string.Concat('\n', embedBuilder.Fields.Select(field => field.Name + '\n' + field.Value))}{embedBuilder.Footer}", ct: this.CancellationToken).ConfigureAwait(false);
+                }
+
+                Result<IMessage> replyResult = await _feedbackService.SendContextualEmbedAsync(embedHelpBuildResult.Entity).ConfigureAwait(false);
+                if (replyResult.IsSuccess)
+                {
+                    continue;
+                }
+
+                _log.LogError("Error making help embed {error}", replyResult.Error.Message);
+                Result<IReadOnlyList<IMessage>> replyEmbedErrorFinalResult = await _feedbackService.SendContextualInfoAsync($"***{embedBuilder.Title}***\n{string.Concat('\n', embedBuilder.Fields.Select(field => field.Name + '\n' + field.Value))}{embedBuilder.Footer}").ConfigureAwait(false);
+
             }
 
-            Result<IMessage> replyResult = await _feedbackService.SendContextualEmbedAsync(embedHelpBuildResult.Entity).ConfigureAwait(false);
-            if (replyResult.IsSuccess)
-            {
-                return Result.FromSuccess();
-            }
-
-            _log.LogError("Error making help embed {error}", replyResult.Error.Message);
-            Result<IReadOnlyList<IMessage>> replyEmbedErrorFinalResult = await _feedbackService.SendContextualInfoAsync(helpString).ConfigureAwait(false);
-            return replyEmbedErrorFinalResult.IsSuccess
-                ? Result.FromError(embedHelpBuildResult)
-                : Result.FromError(replyEmbedErrorFinalResult);
+            return Result.FromSuccess();
         }
 
-        private const string GithubLink = "https://github.com/b-rad15/DiscordMusicRecs";
+        private const string GithubLink = "https://github.com/b-rad15/DiscordBoostRoleBot";
         [Command("github")]
         [Description("Get the link to the Github Repo for Discord Music Recs")]
         public async Task<IResult> GetGithubLink()
@@ -850,7 +841,7 @@ namespace DiscordBoostRoleBot
         [Description("Prints all links to donate to the bot owner")]
         public async Task<IResult> GetDonateLinks()
         {
-            return await _feedbackService.SendContextualSuccessAsync($"Support the dev on ko-fi {DonateLinks}").ConfigureAwait(false);
+            return await _feedbackService.SendContextualSuccessAsync($"Support the dev on ko-fi {DonateLinks[0]}").ConfigureAwait(false);
         }
 
     }

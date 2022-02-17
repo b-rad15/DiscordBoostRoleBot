@@ -29,7 +29,11 @@ namespace DiscordBoostRoleBot
                 ConfiguredTaskAwaitable waitTimer = Task.Delay(_executeInterval, stoppingToken).ConfigureAwait(false);
                 _logger.LogInformation("{className} running at: {time}", GetType().Name, DateTimeOffset.Now);
                 await using Database.RoleDataDbContext database = new();
-                var guildIds = await database.RolesCreated.Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
+                List<Snowflake> guildIds = await database.RolesCreated
+#if DEBUG
+                    .Where(rc=> Program.Config.TestServerId == null || rc.ServerId == Program.Config.TestServerId)
+#endif
+                    .Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
                 {
                     _logger.LogDebug("{guildId}:", guildId);
@@ -44,7 +48,7 @@ namespace DiscordBoostRoleBot
                         continue;
                     }
 
-                    var usersRemoved = removeBoosterResult.Entity;
+                    List<Snowflake> usersRemoved = removeBoosterResult.Entity;
                     if (usersRemoved.Count == 0)
                     {
                         _logger.LogDebug("None removed");

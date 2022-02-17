@@ -120,7 +120,7 @@ namespace DiscordBoostRoleBot {
             return (!member.PremiumSince.HasValue || member.PremiumSince.Value is null);
         }
 
-        public static bool IsModAdminOrOwner(this IGuildMember member)
+        public static bool IsRoleModAdminOrOwner(this IGuildMember member)
         {
             //Permissions are include in object
             return member.Permissions.HasValue
@@ -128,6 +128,24 @@ namespace DiscordBoostRoleBot {
                      && (member.Permissions.Value.HasPermission(DiscordPermission.ManageRoles) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
                    //or it's a me
                      || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+        }
+        public static bool IsChannelModAdminOrOwner(this IGuildMember member)
+        {
+            //Permissions are include in object
+            return member.Permissions.HasValue
+                   //and those permissions include manage roles or admin (since having admin != manage roles)
+                     && (member.Permissions.Value.HasPermission(DiscordPermission.ManageChannels) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
+                   //or it's a me
+                     || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+        }
+        public static bool HasPermAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
+        {
+            //Permissions are include in object
+            return member.Permissions.HasValue
+                   //and those permissions include manage roles or admin (since having admin != manage roles)
+                   && (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.All(perm=>member.Permissions.Value.HasPermission(perm)))
+                   //or it's a me
+                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
         }
     }
     public static class OtherExtensions

@@ -15,6 +15,7 @@ using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Discord.API.Abstractions.Results;
 using Remora.Discord.API.Objects;
+using Remora.Discord.Gateway.Extensions;
 using Remora.Discord.Rest.Extensions;
 using Remora.Rest.Core;
 using Remora.Rest.Results;
@@ -48,6 +49,10 @@ namespace DiscordBoostRoleBot
                             .AddCommandTree()
                                 .WithCommandGroup<RoleCommands>()
                                 .Finish()
+                            .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
+                            .AddCommandTree()
+                                .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
+                                .Finish()
                             .AddHostedService<RolesRemoveService>();
                         // .Finish()
                         // .AddCommandTree(nameof(EmptyCommands))
@@ -66,6 +71,7 @@ namespace DiscordBoostRoleBot
                 .Build();
             IServiceProvider? services = host.Services;
             log = services.GetRequiredService<ILogger<Program>>();
+            LogFactory = services.GetRequiredService<ILoggerFactory>();
             _restGuildApi = services.GetRequiredService<IDiscordRestGuildAPI>();
             Snowflake? debugServer = null;
             ulong? debugServerId = Config.TestServerId;
@@ -85,11 +91,8 @@ namespace DiscordBoostRoleBot
             Result checkSlashSupport = slashService.SupportsSlashCommands();
             if(!checkSlashSupport.IsSuccess)
             {
-                log.LogWarning
-                (
-                    "The registered commands of the bot don't support slash commands: {Reason}",
-                    checkSlashSupport.Error?.Message
-                );
+                log.LogCritical("The registered commands of the bot don't support slash commands: {Reason}",
+                    checkSlashSupport.Error?.Message);
             }
             else
             {
@@ -113,7 +116,10 @@ namespace DiscordBoostRoleBot
 #endif
                 if (!updateSlash.IsSuccess)
                 {
-                    log.LogWarning("Failed to update slash commands: {Reason}", updateSlash.Error?.Message);
+                    if(updateSlash.Error is RestResultError<RestError> restError)
+                        log.LogCritical("Failed to update slash commands: {code} {reason}", restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
+                    else
+                        log.LogCritical("Failed to update slash commands: {Reason}", updateSlash.Error?.Message);
                 }
                 else
                 {
@@ -124,6 +130,8 @@ namespace DiscordBoostRoleBot
 
             Console.WriteLine("Bye bye");
         }
+
+        public static ILoggerFactory LogFactory { get; set; }
 
         internal static async Task<Result<IEnumerable<IGuildMember>>> GetGuildMembers(Snowflake guildId, IRole? role = null, bool checkIsBoosting = false, bool canBeMod = true)
         {
@@ -145,7 +153,7 @@ namespace DiscordBoostRoleBot
                     IEnumerable<IGuildMember> membersToAdd = getMembersResult.Entity;
                     if (role is not null && checkIsBoosting)
                     {
-                        membersToAdd = membersToAdd.Where(gm => (gm.IsBoosting() || (canBeMod && gm.IsModAdminOrOwner())) && gm.Roles.Contains(role.ID));
+                        membersToAdd = membersToAdd.Where(gm => (gm.IsBoosting() || (canBeMod && gm.IsRoleModAdminOrOwner())) && gm.Roles.Contains(role.ID));
                     }
                     else if(role is not null)
                     {
@@ -153,7 +161,7 @@ namespace DiscordBoostRoleBot
                     }
                     else if(checkIsBoosting)
                     {
-                        membersToAdd = membersToAdd.Where(gm=> (gm.IsBoosting() || (canBeMod && gm.IsModAdminOrOwner())));
+                        membersToAdd = membersToAdd.Where(gm=> (gm.IsBoosting() || (canBeMod && gm.IsRoleModAdminOrOwner())));
                     }
                     membersList.AddRange(membersToAdd);
                     lastGuildMemberSnowflake = new Optional<Snowflake>(getMembersResult.Entity.Last().User.Value.ID);

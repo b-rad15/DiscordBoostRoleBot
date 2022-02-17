@@ -1,28 +1,32 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Options;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Rest.Core;
+using SQLitePCL;
 
 namespace DiscordBoostRoleBot
 {
     internal class Database
     {
         private readonly ILogger<Database> _logger;
-        private static ILogger<Database> _loggerStatic;
+
         public Database(ILogger<Database> logger)
         {
-            _logger = _loggerStatic = logger;
+            _logger = logger;
 
         }
-        public class ServersSettings
+        public class RolesServersSettings
         {
             public ulong ServerId { get; set; }
             //Whether to remove roles after boosts run out
             public bool ShouldRemoveRoles { get; set; }
         }
 
-         
+
         public class RoleData
         {
             public ulong RoleId { get; set; }
@@ -45,20 +49,50 @@ namespace DiscordBoostRoleBot
                 builder.HasKey(cl => cl.RoleId );
             }
         }
+
+        public class MessageReactorSettings
+        {
+            public ulong ServerId;
+            public ulong ChannelId;
+            public ulong UserIds;
+            public string Emotes;
+        }
+        public class MessageReactorSettingsEntityTypeConfiguration : IEntityTypeConfiguration<MessageReactorSettings>
+        {
+            public void Configure(EntityTypeBuilder<MessageReactorSettings> builder)
+            {
+                //Property Specific stuff
+                builder.Property(cl => cl.ServerId).IsRequired();
+                builder.Property(cl => cl.UserIds).IsRequired();
+                builder.Property(cl => cl.Emotes).IsRequired();
+                builder.Property(cl => cl.ChannelId).IsRequired();
+                //Table Stuff
+                builder.ToTable("MessageReactorSettings");
+                builder.HasKey(cl => cl.ServerId);
+            }
+        }
         public class RoleDataDbContext : DbContext
         {
             public DbSet<RoleData> RolesCreated { get; set; }
+            public DbSet<MessageReactorSettings> MessageReactorSettings { get; set; }
+
+            private readonly ILoggerFactory _loggerFactory = Program.LogFactory;
 
             protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
                 optionsBuilder.UseSqlite("Data Source=RolesDatabase.db;")
                     // TODO: Figure out logging
                     // .LogTo(_loggerStatic.LogError)
+                    // .ConfigureWarnings(b=>b.Log(
+                    //     (RelationalEventId.ConnectionOpened, LogLevel.Information),
+                    //     (RelationalEventId.ConnectionClosed, LogLevel.Information)))
+                    .UseLoggerFactory(_loggerFactory)
                     .EnableSensitiveDataLogging()
                     .EnableDetailedErrors();
 
             protected override void OnModelCreating(ModelBuilder modelBuilder)
             {
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(RoleDataEntityTypeConfiguration).Assembly);
+                modelBuilder.ApplyConfigurationsFromAssembly(typeof(MessageReactorSettingsEntityTypeConfiguration).Assembly);
             }
 
         }
@@ -74,7 +108,7 @@ namespace DiscordBoostRoleBot
                 Name = name
             };
             await using RoleDataDbContext database = new();
-            await database.AddAsync(roleData).ConfigureAwait(false);
+            database.Add(roleData);
             return await database.SaveChangesAsync().ConfigureAwait(false) > 0;
         }
 
