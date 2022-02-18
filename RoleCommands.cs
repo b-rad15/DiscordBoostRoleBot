@@ -292,12 +292,13 @@ namespace DiscordBoostRoleBot
                                     $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
                                 .ConfigureAwait(false);
                             return (iconStream, imageFormat, !errResponse.IsSuccess
-                                ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
+                                ? Result.FromError(result: errResponse)
                                 : Result.FromSuccess());
                         }
 
                         iconStream = new MemoryStream();
-                        await imgToConvert.SaveAsync(iconStream, new PngEncoder()).ConfigureAwait(false);
+                        await imgToConvert.SaveAsync(iconStream, new PngEncoder());
+                        iconStream.Position = 0;
 
                     }
                     catch
