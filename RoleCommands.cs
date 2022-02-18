@@ -283,16 +283,41 @@ namespace DiscordBoostRoleBot
                 imageFormat = Image.DetectFormat(data: imgData);
                 if (imageFormat is not JpegFormat && imageFormat is not PngFormat && imageFormat is not GifFormat)
                 {
-                    errResponse = await _feedbackService.SendContextualErrorAsync(
-                            $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
-                        .ConfigureAwait(false);
-                    return (iconStream, imageFormat, !errResponse.IsSuccess
-                        ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
-                        : Result.FromSuccess());
+                    try
+                    {
+                        var imgToConvert = Image.Load(imgData);
+                        if (imgToConvert is null)
+                        {
+                            errResponse = await _feedbackService.SendContextualErrorAsync(
+                                    $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
+                                .ConfigureAwait(false);
+                            return (iconStream, imageFormat, !errResponse.IsSuccess
+                                ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
+                                : Result.FromSuccess());
+                        }
+
+                        await imgToConvert.SaveAsync(iconStream, new PngEncoder()).ConfigureAwait(false);
+
+                    }
+                    catch
+                    {
+                        errResponse = await _feedbackService.SendContextualErrorAsync(
+                                $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
+                            .ConfigureAwait(false);
+                        return (iconStream, imageFormat, !errResponse.IsSuccess
+                            ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
+                            : Result.FromSuccess());
+                    }
+
+                }
+                else
+                {
+
+                    iconStream = new MemoryStream(imgData);
                 }
 
-                dataUri = $"data:{imageFormat.DefaultMimeType};base64,{Convert.ToBase64String(inArray: imgData)}";
-                _log.LogInformation("Image is {dataUri}", dataUri);
+                // dataUri = $"data:{imageFormat.DefaultMimeType};base64,{Convert.ToBase64String(inArray: imgData)}";
+                // _log.LogInformation("Image is {dataUri}", dataUri);
             }
             catch (Exception e)
             {
@@ -308,7 +333,6 @@ namespace DiscordBoostRoleBot
             // _log.LogInformation("Data Stream : {stream}", new MemoryStream(Encoding.UTF8.GetBytes(dataUri)).);
             // iconStream = new MemoryStream(Encoding.UTF8.GetBytes(s: dataUri));
             // BitConverter.GetBytes(9894494448401390090).CopyTo(imgData, 0);
-            iconStream = new MemoryStream(imgData);
 
             return (iconStream, imageFormat, null);
         }
