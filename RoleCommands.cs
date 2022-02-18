@@ -171,9 +171,9 @@ namespace DiscordBoostRoleBot
                 isHoisted: false, isMentionable: true, ct: this.CancellationToken).ConfigureAwait(false);
             if (!roleResult.IsSuccess)
             {
-                _log.LogError($"Could not assign role to {assign_to_member.User.Value.Mention()} because {roleResult.Error}");
+                _log.LogError($"Could not create role for {assign_to_member.User.Value.Mention()} because {roleResult.Error}");
                 reply = await _feedbackService.SendContextualErrorAsync(
-                    $"Could not assign role to {assign_to_member.User.Value.Mention()}, make sure the bot's permissions are set correctly. Error = {roleResult.Error.Message}", ct: this.CancellationToken).ConfigureAwait(false);
+                    $"Could not create role for {assign_to_member.User.Value.Mention()}, make sure the bot's permissions are set correctly. Error = {roleResult.Error.Message}", ct: this.CancellationToken).ConfigureAwait(false);
                 return roleResult;
             }
             IRole role = roleResult.Entity;
@@ -296,6 +296,7 @@ namespace DiscordBoostRoleBot
                                 : Result.FromSuccess());
                         }
 
+                        iconStream = new MemoryStream();
                         await imgToConvert.SaveAsync(iconStream, new PngEncoder()).ConfigureAwait(false);
 
                     }
