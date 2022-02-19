@@ -119,7 +119,11 @@ namespace DiscordBoostRoleBot {
             //Premium since value was not returned or it is null
             return (!member.PremiumSince.HasValue || member.PremiumSince.Value is null);
         }
-
+        public static bool IsOwner(this IGuildMember member) => member.User.HasValue && member.User.Value.IsOwner();
+        public static bool IsOwner(this IUser user)
+        {
+            return user.ID.Value == Program.Config.BotOwnerId;
+        }
         public static bool IsRoleModAdminOrOwner(this IGuildMember member)
         {
             //Permissions are include in object

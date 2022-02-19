@@ -17,6 +17,7 @@ using Remora.Results;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Remora.Discord.API.Objects;
+using Remora.Discord.Commands.Responders;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -30,8 +31,10 @@ namespace DiscordBoostRoleBot
     {
         private readonly FeedbackService _feedbackService;
         private readonly ICommandContext _context;
-        private readonly IDiscordRestGuildAPI _restGuildAPI;
-        private readonly IDiscordRestUserAPI _restUserAPI;
+        private readonly IDiscordRestGuildAPI _restGuildApi;
+        private readonly IDiscordRestUserAPI _restUserApi;
+        private readonly IDiscordRestChannelAPI _restChannelApi;
+        private readonly CommandResponderOptions _commandResponderOptions;
         private readonly ILogger<Program> _log; 
 
         /// <summary>
@@ -40,13 +43,16 @@ namespace DiscordBoostRoleBot
         /// <param name="feedbackService">The feedback service.</param>
         /// <param name="context">The command context.</param>
         /// <param name="restGuildApi">The DiscordRestGuildAPI to allow guild api access.</param>
-        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<Program> log, IDiscordRestUserAPI restUserApi)
+        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<Program> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi, CommandResponderOptions commandResponderOptions)
         {
             _feedbackService = feedbackService;
             _context = context;
-            _restGuildAPI = restGuildApi;
+            _restGuildApi = restGuildApi;
             _log = log;
-            _restUserAPI = restUserApi;
+            _restUserApi = restUserApi;
+            _restChannelApi = restChannelApi;
+            commandResponderOptions.Prefix = "&";
+            _commandResponderOptions = commandResponderOptions;
         }
 
         public static Color GetColorFromString(string colorString) => ColorTranslator.FromHtml(colorString);
@@ -66,6 +72,7 @@ namespace DiscordBoostRoleBot
         {
             IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
+            Result deleteResponse;
             switch (_context)
             {
                 case InteractionContext interactionContext:
@@ -85,14 +92,21 @@ namespace DiscordBoostRoleBot
                     break;
                 case MessageContext messageContext:
                 {
-                    Result<IGuildMember> guildMemberResult = await _restGuildAPI.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                    Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
                     if (!guildMemberResult.IsSuccess)
                     {
                         _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
                         errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server").ConfigureAwait(false);
-                        return errResponse.IsSuccess
-                            ? Result.FromSuccess()
-                            : Result.FromError(result: errResponse);
+                        if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                        {
+                            return errResponse.IsSuccess
+                                ? Result.FromSuccess()
+                                : Result.FromError(result: errResponse);
+                        }
+
+                        await Task.Delay(DeleteOwnerMessageDelay);
+                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                        return deleteResponse;
                     }
                     executorGuildMember = guildMemberResult.Entity;
                     if (messageContext.Message.Attachments.HasValue && messageContext.Message.Attachments.Value.Count > 0)
@@ -109,9 +123,16 @@ namespace DiscordBoostRoleBot
                 }
                 default:
                     errResponse = await _feedbackService.SendContextualErrorAsync("I don't know how you invoked this command").ConfigureAwait(false);
-                    return errResponse.IsSuccess
-                        ? Result.FromSuccess()
-                        : Result.FromError(result: errResponse);
+                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    {
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(result: errResponse);
+                    }
+
+                    await Task.Delay(DeleteOwnerMessageDelay);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    return deleteResponse;
             }
 
             assign_to_member ??= executorGuildMember;
@@ -125,9 +146,16 @@ namespace DiscordBoostRoleBot
                 }
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"You do not have the required permissions to create this role for {assign_to_member.Mention()}, not boosting and don't have ManageRoles mod permissions").ConfigureAwait(false);
-                return !errResponse.IsSuccess
-                    ? Result.FromError(result: errResponse)
-                    : Result.FromSuccess();
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
 
             //Declare necessary variables
@@ -142,17 +170,31 @@ namespace DiscordBoostRoleBot
             catch (ArgumentException e)
             {
                 _log.LogWarning("Color not found {color} because {e}", color, e);
-                reply = await _feedbackService.SendContextualErrorAsync($"Invalid color {color}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
-                return !reply.IsSuccess
-                    ? Result.FromError(result: reply)
-                    : Result.FromSuccess();
+                errResponse = await _feedbackService.SendContextualErrorAsync($"Invalid color {color}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
             if (!_context.GuildID.HasValue)
             {
-                reply = await _feedbackService.SendContextualErrorAsync("You are not sending this command in a guild, somehow your permissions are broken", ct: this.CancellationToken).ConfigureAwait(false);
-                return !reply.IsSuccess
-                    ? Result.FromError(result: reply)
-                    : Result.FromSuccess();
+                errResponse = await _feedbackService.SendContextualErrorAsync("You are not sending this command in a guild, somehow your permissions are broken", ct: this.CancellationToken).ConfigureAwait(false);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
             //Prepare server
             Snowflake requestServer = _context.GuildID.Value;
@@ -167,14 +209,23 @@ namespace DiscordBoostRoleBot
                     return makeNewRole;
             }
 
-            Result<IRole> roleResult = await _restGuildAPI.CreateGuildRoleAsync(guildID: requestServer, name: role_name, colour: roleColor, icon: iconStream ?? default(Optional<Stream>),
+            Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: requestServer, name: role_name, colour: roleColor, icon: iconStream ?? default(Optional<Stream>),
                 isHoisted: false, isMentionable: true, ct: this.CancellationToken).ConfigureAwait(false);
             if (!roleResult.IsSuccess)
             {
                 _log.LogError($"Could not create role for {assign_to_member.User.Value.Mention()} because {roleResult.Error}");
-                reply = await _feedbackService.SendContextualErrorAsync(
+                errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not create role for {assign_to_member.User.Value.Mention()}, make sure the bot's permissions are set correctly. Error = {roleResult.Error.Message}", ct: this.CancellationToken).ConfigureAwait(false);
-                return roleResult;
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
             IRole role = roleResult.Entity;
             bool addedToDb = await Database.AddRoleToDatabase(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value,
@@ -182,36 +233,51 @@ namespace DiscordBoostRoleBot
             if (!addedToDb)
             {
                 _log.LogError($"Could not add role to database");
-                reply = await _feedbackService.SendContextualErrorAsync(
+                errResponse = await _feedbackService.SendContextualErrorAsync(
                     "Failed to track role, try again later", ct: this.CancellationToken).ConfigureAwait(false);
-                return reply.IsSuccess
-                    ? Result.FromSuccess()
-                    : Result.FromError(reply);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
-            Result roleApplyResult = await _restGuildAPI.AddGuildMemberRoleAsync(guildID: _context.GuildID.Value,
+            Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: _context.GuildID.Value,
                 userID: assign_to_member.User.Value.ID, roleID: role.ID,
                 "User is boosting, role request via BoostRoleManager bot", ct: this.CancellationToken).ConfigureAwait(false);
             if (!roleApplyResult.IsSuccess)
             {
                 _log.LogError($"Could not make role because {roleApplyResult.Error}");
-                reply = await _feedbackService.SendContextualErrorAsync(
+                errResponse = await _feedbackService.SendContextualErrorAsync(
                     "Could not make role, make sure the bot's permissions are set correctly", ct: this.CancellationToken).ConfigureAwait(false);
-                return roleApplyResult;
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
 
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
 
             string msg = "";
-            Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildAPI.GetGuildRolesAsync(_context.GuildID.Value, ct: this.CancellationToken).ConfigureAwait(false);
+            Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildApi.GetGuildRolesAsync(_context.GuildID.Value, ct: this.CancellationToken).ConfigureAwait(false);
             if (getRolesResult.IsSuccess)
             {
                 IReadOnlyList<IRole> guildRoles = getRolesResult.Entity;
                 Result<IUser> currentBotUserResult =
-                    await _restUserAPI.GetCurrentUserAsync(ct: this.CancellationToken).ConfigureAwait(false);
+                    await _restUserApi.GetCurrentUserAsync(ct: this.CancellationToken).ConfigureAwait(false);
                 if (currentBotUserResult.IsSuccess)
                 {
                     IUser currentBotUser = currentBotUserResult.Entity;
                     Result<IGuildMember> currentBotMemberResult =
-                        await _restGuildAPI.GetGuildMemberAsync(_context.GuildID.Value, currentBotUser.ID,
+                        await _restGuildApi.GetGuildMemberAsync(_context.GuildID.Value, currentBotUser.ID,
                             this.CancellationToken).ConfigureAwait(false);
                     if (currentBotMemberResult.IsSuccess)
                     {
@@ -220,17 +286,26 @@ namespace DiscordBoostRoleBot
                         IRole? maxPosRole = botRoles.MaxBy(br => br.Position);
                         _log.LogDebug("Bot's highest role is {role_name}: {roleId}", maxPosRole.Name, maxPosRole.ID);
                         int maxPos = maxPosRole.Position;
-                        Result<IReadOnlyList<IRole>> roleMovePositionResult = await _restGuildAPI
+                        Result<IReadOnlyList<IRole>> roleMovePositionResult = await _restGuildApi
                             .ModifyGuildRolePositionsAsync(_context.GuildID.Value,
                                 new (Snowflake RoleID, Optional<int?> Position)[] { (role.ID, maxPos) }).ConfigureAwait(false);
                         if (!roleMovePositionResult.IsSuccess)
                         {
                             _log.LogWarning($"Could not move the role because {roleMovePositionResult.Error}");
-                            reply = await _feedbackService
+                            errResponse = await _feedbackService
                                 .SendContextualErrorAsync(
                                     "Could not move role in list, check the bot's permissions and try again",
                                     ct: this.CancellationToken).ConfigureAwait(false);
-                            return roleMovePositionResult;
+                            if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                            {
+                                return errResponse.IsSuccess
+                                    ? Result.FromSuccess()
+                                    : Result.FromError(result: errResponse);
+                            }
+
+                            await Task.Delay(DeleteOwnerMessageDelay);
+                            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                            return deleteResponse;
                         }
 
                         _log.LogDebug(roleMovePositionResult.ToString()); 
@@ -256,9 +331,16 @@ namespace DiscordBoostRoleBot
             msg += $"Made Role {role.Mention()} and assigned to {assign_to_member.Mention()}\n";
             FeedbackMessage message = new(msg.TrimEnd(), Colour: role.Colour);
             reply = await _feedbackService.SendContextualMessageAsync(message: message, ct: this.CancellationToken).ConfigureAwait(false);
-            return !reply.IsSuccess
-                ? Result.FromError(result: reply)
-                : Result.FromSuccess();
+            if (!_context.User.IsOwner() || !reply.IsSuccess)
+            {
+                return reply.IsSuccess
+                    ? Result.FromSuccess()
+                    : Result.FromError(result: reply);
+            }
+
+            await Task.Delay(DeleteOwnerMessageDelay);
+            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, reply.Entity.First().ID);
+            return deleteResponse;
         }
 
         //TODO: Convert to Result<(MemoryStream?, IImageFormat?)> or something similar
@@ -352,7 +434,7 @@ namespace DiscordBoostRoleBot
                     break;
                 case MessageContext messageContext:
                 {
-                    Result<IGuildMember> guildMemberResult = await _restGuildAPI.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                    Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
                     if (!guildMemberResult.IsSuccess)
                     {
                         _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
@@ -413,13 +495,13 @@ namespace DiscordBoostRoleBot
                         return Result.FromError(replyResult);
                     if (!delete_role) 
                         return Result.FromSuccess();
-                    Result removeRoleResult = await _restGuildAPI.RemoveGuildMemberRoleAsync(_context.GuildID.Value, new Snowflake(ownerId), role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken).ConfigureAwait(false);
+                    Result removeRoleResult = await _restGuildApi.RemoveGuildMemberRoleAsync(_context.GuildID.Value, new Snowflake(ownerId), role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken).ConfigureAwait(false);
                     if (!removeRoleResult.IsSuccess)
                     {
                         _log.LogError("Could not remove role {role} : {roleMention} from member {memberId} because {error}", role.Name,
                             role.Mention(), ownerId, removeRoleResult.Error);
                     }
-                    Result deleteResult = await _restGuildAPI.DeleteGuildRoleAsync(_context.GuildID.Value, role.ID, reason: $"User requested deletion", ct: this.CancellationToken).ConfigureAwait(false);
+                    Result deleteResult = await _restGuildApi.DeleteGuildRoleAsync(_context.GuildID.Value, role.ID, reason: $"User requested deletion", ct: this.CancellationToken).ConfigureAwait(false);
                     if (!deleteResult.IsSuccess)
                     {
                         _log.LogError("Could not remove role {role} : {roleMention} because {error}", role.Name,
@@ -465,7 +547,7 @@ namespace DiscordBoostRoleBot
                     break;
                 case MessageContext messageContext:
                     {
-                        Result<IGuildMember> guildMemberResult = await _restGuildAPI.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
                         if (!guildMemberResult.IsSuccess)
                         {
                             _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
@@ -506,7 +588,7 @@ namespace DiscordBoostRoleBot
             while (true)
             {
                 Result<IReadOnlyList<IGuildMember>> getMembersResult =
-                    await _restGuildAPI.ListGuildMembersAsync(_context.GuildID.Value, limit: 1000, after: lastGuildMemberSnowflake).ConfigureAwait(false);
+                    await _restGuildApi.ListGuildMembersAsync(_context.GuildID.Value, limit: 1000, after: lastGuildMemberSnowflake).ConfigureAwait(false);
                 if (!getMembersResult.IsSuccess)
                 {
                     return await SendErrorReply(
@@ -540,7 +622,7 @@ namespace DiscordBoostRoleBot
                     }
 
                     ownerMemberSnowflake = new_owner.ID;
-                    Result addRoleResult = await _restGuildAPI.AddGuildMemberRoleAsync(_context.GuildID.Value,
+                    Result addRoleResult = await _restGuildApi.AddGuildMemberRoleAsync(_context.GuildID.Value,
                         ownerMemberSnowflake, role.ID,
                         reason: $"User added role when starting tracking").ConfigureAwait(false);
                     if (!addRoleResult.IsSuccess)
@@ -563,6 +645,8 @@ namespace DiscordBoostRoleBot
             return await SendSuccessReply($"Successfully started tracking {role.Mention()}, you can now modify it via bot commands").ConfigureAwait(false);
         }
 
+        private const int DeleteOwnerMessageDelay = 1000;
+
         [Command("modify-role")]
         [Description("Modify a role's properties")]
         public async Task<IResult> ModifyRole([Description("The role to change")] IRole role,
@@ -578,41 +662,75 @@ namespace DiscordBoostRoleBot
             //Check Server Member has permissions to use command
             IGuildMember member;
             Result<IReadOnlyList<IMessage>> errResponse;
+            Result deleteResponse;
             switch (_context)
             {
                 case InteractionContext interactionContext:
                     member = interactionContext.Member.Value;
                     break;
                 case MessageContext messageContext:
-                    Result<IGuildMember> guildMemberResult = await _restGuildAPI.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                    Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
                     if (!guildMemberResult.IsSuccess)
                     {
                         _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
                         errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server").ConfigureAwait(false);
-                        return errResponse.IsSuccess
-                            ? Result.FromSuccess()
-                            : Result.FromError(result: errResponse);
+                        if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                        {
+                            return errResponse.IsSuccess
+                                ? Result.FromSuccess()
+                                : Result.FromError(result: errResponse);
+                        }
+                        await Task.Delay(DeleteOwnerMessageDelay);
+                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                        return deleteResponse;
                     }
 
                     member = guildMemberResult.Entity;
                     break;
                 default:
                     errResponse = await _feedbackService.SendContextualErrorAsync("I don't know how you invoked this command").ConfigureAwait(false);
-                    return errResponse.IsSuccess
-                        ? Result.FromSuccess()
-                        : Result.FromError(result: errResponse);
+                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    {
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(result: errResponse);
+                    }
+
+                    await Task.Delay(DeleteOwnerMessageDelay);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    return deleteResponse;
             }
             await using Database.RoleDataDbContext database = new();
             Database.RoleData? roleData = await database.RolesCreated
                 .Where(rd => _context.GuildID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (roleData == null)
             {
-                return await SendErrorReply("Role not found in database, check that this command is tracking it").ConfigureAwait(false);
+                errResponse = await _feedbackService.SendContextualErrorAsync("Role not found in database, check that this command is tracking it").ConfigureAwait(false); 
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
             //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
             if (_context.User.ID != member.User.Value.ID && !member.IsRoleModAdminOrOwner())
             {
-                return await SendErrorReply("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
+                errResponse = await _feedbackService.SendContextualErrorAsync("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
 
             //Handle Name Change
@@ -632,10 +750,17 @@ namespace DiscordBoostRoleBot
                 catch (ArgumentException e)
                 {
                     _log.LogWarning("Color not found {color} because {e}", new_color_string, e);
-                    Result<IReadOnlyList<IMessage>> reply = await _feedbackService.SendContextualErrorAsync($"Invalid color {new_color_string}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
-                    return !reply.IsSuccess
-                        ? Result.FromError(result: reply)
-                        : Result.FromSuccess();
+                    errResponse = await _feedbackService.SendContextualErrorAsync($"Invalid color {new_color_string}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
+                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    {
+                        return !errResponse.IsSuccess
+                            ? Result.FromError(result: errResponse)
+                            : Result.FromSuccess();
+                    }
+
+                    await Task.Delay(DeleteOwnerMessageDelay);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    return deleteResponse;
                 }
             }
             //Handle Image Change
@@ -643,14 +768,14 @@ namespace DiscordBoostRoleBot
             Result<IRole> modifyRoleResult;
             if (new_image is null)
             {
-                modifyRoleResult = await _restGuildAPI.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
+                modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     reason: $"Member requested to modify role").ConfigureAwait(false);
             }
             else if (IsUnicodeOrEmoji(new_image))
             {
-                modifyRoleResult = await _restGuildAPI.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
+                modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     unicodeEmoji: new_image,
@@ -658,16 +783,35 @@ namespace DiscordBoostRoleBot
             } else
             {
                 //Get guild info to tell premium tier
-                Result<IGuild> getGuildResult = await _restGuildAPI.GetGuildAsync(_context.GuildID.Value).ConfigureAwait(false);
+                Result<IGuild> getGuildResult = await _restGuildApi.GetGuildAsync(_context.GuildID.Value).ConfigureAwait(false);
                 if (!getGuildResult.IsSuccess)
                 {
-                    return await SendErrorReply("Could not get info about the guild you are in, try again later").ConfigureAwait(false);
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not get info about the guild you are in, try again later").ConfigureAwait(false);
+                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    {
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(result: errResponse);
+                    }
+
+                    await Task.Delay(DeleteOwnerMessageDelay);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    return deleteResponse;
                 }
 
                 if (getGuildResult.Entity.PremiumTier < PremiumTier.Tier2)
                 {
-                    return await SendErrorReply(
-                        $"Server must be boosted at least to tier 2 before adding role icons.\n{7 - getGuildResult.Entity.PremiumSubscriptionCount.Value} more boost needed").ConfigureAwait(false);
+                    errResponse = await _feedbackService.SendContextualErrorAsync($"Server must be boosted at least to tier 2 before adding role icons.\n{7 - getGuildResult.Entity.PremiumSubscriptionCount.Value} more boost needed").ConfigureAwait(false);
+                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    {
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(result: errResponse);
+                    }
+
+                    await Task.Delay(DeleteOwnerMessageDelay);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    return deleteResponse;
                 }
 
                 IResult? makeNewRole;
@@ -681,7 +825,7 @@ namespace DiscordBoostRoleBot
                         return makeNewRole;
                     }
                 }
-                modifyRoleResult = await _restGuildAPI.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
+                modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     icon: newIconStream ?? default(Optional<Stream?>),
@@ -704,28 +848,49 @@ namespace DiscordBoostRoleBot
                     return await SendErrorReply(
                         $"format {newIconFormat.Name} rejected by discord please convert to JPG or PNG").ConfigureAwait(false);
                 }
-                replyResult = await _feedbackService.SendContextualSuccessAsync(
+                errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not modify {role.Mention()} check that the bot has the correct permissions").ConfigureAwait(false);
-                return replyResult.IsSuccess
-                    ? Result.FromSuccess()
-                    : Result.FromError(replyResult);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
             }
             //If we changed db items and didn't save to the db
             if ((new_name is not null || new_color_string is not null) && await database.SaveChangesAsync().ConfigureAwait(false) < 1)
             {
                 //TODO: Change role back or queue a later write to the database
-                replyResult = await _feedbackService.SendContextualSuccessAsync(
+                errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not modify database for {modifyRoleResult.Entity.Mention()}, try again later").ConfigureAwait(false);
+                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                return deleteResponse;
+            }
+
+            replyResult = await _feedbackService.SendContextualSuccessAsync(
+                $"Successfully modified role {modifyRoleResult.Entity.Mention()}").ConfigureAwait(false);
+            if (!_context.User.IsOwner() || !replyResult.IsSuccess)
+            {
                 return replyResult.IsSuccess
                     ? Result.FromSuccess()
                     : Result.FromError(replyResult);
             }
 
-            replyResult = await _feedbackService.SendContextualSuccessAsync(
-                $"Successfully modified role {modifyRoleResult.Entity.Mention()}").ConfigureAwait(false);
-            return replyResult.IsSuccess
-                ? Result.FromSuccess()
-                : Result.FromError(replyResult);
+            await Task.Delay(DeleteOwnerMessageDelay);
+            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, replyResult.Entity.First().ID);
+            return deleteResponse;
         }
 
         private static bool IsUnicodeOrEmoji(string newImage)
