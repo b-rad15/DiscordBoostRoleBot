@@ -4,6 +4,7 @@ using Humanizer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Remora.Commands.Extensions;
@@ -15,8 +16,10 @@ using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Discord.API.Abstractions.Results;
 using Remora.Discord.API.Objects;
+using Remora.Discord.Commands.Responders;
 using Remora.Discord.Gateway.Extensions;
 using Remora.Discord.Rest.Extensions;
+using Remora.Extensions.Options.Immutable;
 using Remora.Rest.Core;
 using Remora.Rest.Results;
 using SQLitePCL;
@@ -43,15 +46,18 @@ namespace DiscordBoostRoleBot
                     (_, services) =>
                     {
                         services
-                            .AddDbContext<Database.RoleDataDbContext>()
                             .AddDiscordRest(_ => Config.Token)
                             .AddDiscordCommands(true)
+                            .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
                             .AddCommandTree()
                                 .WithCommandGroup<RoleCommands>()
                                 .Finish()
                             .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
                             .AddCommandTree()
                                 .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
+                                .Finish()
+                            .AddCommandTree()
+                                .WithCommandGroup<CommandResponderConfigCommands>()
                                 .Finish()
                             .AddHostedService<RolesRemoveService>();
                         // .Finish()
@@ -185,7 +191,7 @@ namespace DiscordBoostRoleBot
             }
 
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
-            await using Database.RoleDataDbContext database = new();
+            await using Database.DiscordDbContext database = new();
             List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync().ConfigureAwait(false);
             foreach (Database.RoleData roleCreated in rolesCreatedForGuild.Where(roleCreated => guildBoosters.All(gb => roleCreated.RoleUserId != gb.User.Value.ID.Value)))
             {
@@ -212,7 +218,7 @@ namespace DiscordBoostRoleBot
                 peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
             }
 
-            int numRows = await database.SaveChangesAsync();
+            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
             if (numRows != peopleRemoved.Count)
             {
                 log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);

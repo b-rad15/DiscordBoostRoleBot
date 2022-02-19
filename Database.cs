@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Rest.Core;
+using Remora.Results;
 using SQLitePCL;
 
 namespace DiscordBoostRoleBot
@@ -25,8 +26,6 @@ namespace DiscordBoostRoleBot
             //Whether to remove roles after boosts run out
             public bool ShouldRemoveRoles { get; set; }
         }
-
-
         public class RoleData
         {
             public ulong RoleId { get; set; }
@@ -49,7 +48,6 @@ namespace DiscordBoostRoleBot
                 builder.HasKey(cl => cl.RoleId );
             }
         }
-
         public class MessageReactorSettings
         {
             public ulong ServerId;
@@ -71,10 +69,28 @@ namespace DiscordBoostRoleBot
                 builder.HasKey(cl => cl.ServerId);
             }
         }
-        public class RoleDataDbContext : DbContext
+        public class ServerSettings
+        {
+            public ulong ServerId;
+            public string Prefix = "&";
+        }
+        public class ServerSettingsEntityTypeConfiguration : IEntityTypeConfiguration<ServerSettings>
+        {
+            public void Configure(EntityTypeBuilder<ServerSettings> builder)
+            {
+                //Property Specific stuff
+                builder.Property(cl => cl.ServerId).IsRequired();
+                builder.Property(cl => cl.Prefix).IsRequired().HasDefaultValue("&");
+                //Table Stuff
+                builder.ToTable("ServerSettings");
+                builder.HasKey(cl => cl.ServerId);
+            }
+        }
+        public class DiscordDbContext : DbContext
         {
             public DbSet<RoleData> RolesCreated { get; set; }
             public DbSet<MessageReactorSettings> MessageReactorSettings { get; set; }
+            public DbSet<ServerSettings> ServerSettings { get; set; }
 
             private readonly ILoggerFactory _loggerFactory = Program.LogFactory;
 
@@ -93,10 +109,10 @@ namespace DiscordBoostRoleBot
             {
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(RoleDataEntityTypeConfiguration).Assembly);
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(MessageReactorSettingsEntityTypeConfiguration).Assembly);
+                modelBuilder.ApplyConfigurationsFromAssembly(typeof(ServerSettingsEntityTypeConfiguration).Assembly);
             }
 
         }
-
         public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name)
         {
             RoleData roleData = new()
@@ -107,22 +123,20 @@ namespace DiscordBoostRoleBot
                 Color = color,
                 Name = name
             };
-            await using RoleDataDbContext database = new();
+            await using DiscordDbContext database = new();
             database.Add(roleData);
             return await database.SaveChangesAsync().ConfigureAwait(false) > 0;
         }
-
         public static async Task<int> GetRoleCount(ulong serverId, ulong userId)
         {
-            await using RoleDataDbContext database = new();
+            await using DiscordDbContext database = new();
             return await database.RolesCreated.CountAsync(rd => rd.RoleUserId == userId).ConfigureAwait(false);
         }
-
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(IRole role) => await RemoveRoleFromDatabase(role.ID).ConfigureAwait(false);
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(Snowflake roleSnowflake) => await RemoveRoleFromDatabase(roleSnowflake.Value).ConfigureAwait(false);
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(ulong roleId)
         {
-            await using RoleDataDbContext database = new();
+            await using DiscordDbContext database = new();
             RoleData? roleToRemove = await database.RolesCreated.Where(roleData => roleData.RoleId == roleId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (roleToRemove is null)
             {
@@ -130,6 +144,37 @@ namespace DiscordBoostRoleBot
             }
             database.RolesCreated.Remove(roleToRemove);
             return (await database.SaveChangesAsync().ConfigureAwait(false), roleToRemove.RoleUserId);
+        }
+
+        public static async Task<string> GetPrefix(Snowflake guildId) => await GetPrefix(guildId.Value).ConfigureAwait(false);
+        public static async Task<string> GetPrefix(ulong guildId)
+        {
+            await using DiscordDbContext database = new();
+            string? prefix = await database.ServerSettings.Where(ss => ss.ServerId == guildId).Select(ss=>ss.Prefix).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
+            return prefix ?? PrefixSetter.DefaultPrefix;
+        }
+        public static async Task<Result> SetPrefix(Snowflake guildId, string prefix) => await SetPrefix(guildId.Value, prefix).ConfigureAwait(false);
+        public static async Task<Result> SetPrefix(ulong guildId, string prefix)
+        {
+            await using DiscordDbContext database = new();
+            ServerSettings? serverSettings = await database.ServerSettings.Where(ss => ss.ServerId == guildId).FirstOrDefaultAsync().ConfigureAwait(false);
+            if (serverSettings is null)
+            {
+                serverSettings = new()
+                {
+                    Prefix = prefix,
+                    ServerId = guildId
+                };
+                database.Add(serverSettings);
+            }
+            else
+            {
+                serverSettings.ServerId = guildId;
+            }
+            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
+            return numRows > 1 
+                ? Result.FromSuccess() 
+                : Result.FromError<string>($"Failed to save database, {numRows} rows updated");
         }
     }
 }

@@ -28,7 +28,7 @@ namespace DiscordBoostRoleBot
             {
                 ConfiguredTaskAwaitable waitTimer = Task.Delay(_executeInterval, stoppingToken).ConfigureAwait(false);
                 _logger.LogInformation("{className} running at: {time}", GetType().Name, DateTimeOffset.Now);
-                await using Database.RoleDataDbContext database = new();
+                await using Database.DiscordDbContext database = new();
                 List<Snowflake> guildIds = await database.RolesCreated
 #if DEBUG
                     .Where(rc=> Program.Config.TestServerId == null || rc.ServerId == Program.Config.TestServerId)
@@ -37,7 +37,7 @@ namespace DiscordBoostRoleBot
                 foreach (Snowflake guildId in guildIds)
                 {
                     _logger.LogDebug("{guildId}:", guildId);
-                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId);
+                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId).ConfigureAwait(false);
                     if (!removeBoosterResult.IsSuccess)
                     {
                         if (removeBoosterResult.Error.Message.Contains("inner"))

@@ -34,8 +34,7 @@ namespace DiscordBoostRoleBot
         private readonly IDiscordRestGuildAPI _restGuildApi;
         private readonly IDiscordRestUserAPI _restUserApi;
         private readonly IDiscordRestChannelAPI _restChannelApi;
-        private readonly CommandResponderOptions _commandResponderOptions;
-        private readonly ILogger<Program> _log; 
+        private readonly ILogger<Program> _log;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RoleCommands"/> class.
@@ -43,7 +42,10 @@ namespace DiscordBoostRoleBot
         /// <param name="feedbackService">The feedback service.</param>
         /// <param name="context">The command context.</param>
         /// <param name="restGuildApi">The DiscordRestGuildAPI to allow guild api access.</param>
-        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<Program> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi, CommandResponderOptions commandResponderOptions)
+        /// <param name="log">The logger used</param>
+        /// <param name="restUserApi">Access to the User rest API</param>
+        /// <param name="restChannelApi">Access to the Channel rest API</param>
+        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<Program> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi)
         {
             _feedbackService = feedbackService;
             _context = context;
@@ -51,8 +53,6 @@ namespace DiscordBoostRoleBot
             _log = log;
             _restUserApi = restUserApi;
             _restChannelApi = restChannelApi;
-            commandResponderOptions.Prefix = "&";
-            _commandResponderOptions = commandResponderOptions;
         }
 
         public static Color GetColorFromString(string colorString) => ColorTranslator.FromHtml(colorString);
@@ -104,8 +104,8 @@ namespace DiscordBoostRoleBot
                                 : Result.FromError(result: errResponse);
                         }
 
-                        await Task.Delay(DeleteOwnerMessageDelay);
-                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                        await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                         return deleteResponse;
                     }
                     executorGuildMember = guildMemberResult.Entity;
@@ -130,8 +130,8 @@ namespace DiscordBoostRoleBot
                             : Result.FromError(result: errResponse);
                     }
 
-                    await Task.Delay(DeleteOwnerMessageDelay);
-                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
             }
 
@@ -153,8 +153,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
 
@@ -178,8 +178,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             if (!_context.GuildID.HasValue)
@@ -192,8 +192,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             //Prepare server
@@ -223,8 +223,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             IRole role = roleResult.Entity;
@@ -242,8 +242,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: _context.GuildID.Value,
@@ -261,8 +261,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
 
@@ -303,8 +303,8 @@ namespace DiscordBoostRoleBot
                                     : Result.FromError(result: errResponse);
                             }
 
-                            await Task.Delay(DeleteOwnerMessageDelay);
-                            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                            await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                             return deleteResponse;
                         }
 
@@ -338,8 +338,8 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(result: reply);
             }
 
-            await Task.Delay(DeleteOwnerMessageDelay);
-            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, reply.Entity.First().ID);
+            await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, reply.Entity.First().ID).ConfigureAwait(false);
             return deleteResponse;
         }
 
@@ -367,7 +367,7 @@ namespace DiscordBoostRoleBot
                 {
                     try
                     {
-                        var imgToConvert = Image.Load(imgData);
+                        Image? imgToConvert = Image.Load(imgData);
                         if (imgToConvert is null)
                         {
                             errResponse = await _feedbackService.SendContextualErrorAsync(
@@ -379,7 +379,7 @@ namespace DiscordBoostRoleBot
                         }
 
                         iconStream = new MemoryStream();
-                        await imgToConvert.SaveAsync(iconStream, new PngEncoder());
+                        await imgToConvert.SaveAsync(iconStream, new PngEncoder()).ConfigureAwait(false);
                         iconStream.Position = 0;
 
                     }
@@ -533,7 +533,7 @@ namespace DiscordBoostRoleBot
         public async Task<IResult> TrackRole([Description("The role to track")] IRole role,
             [Description("If this role has no members, assign it to this user")] IUser? new_owner = null)
         {
-            await using Database.RoleDataDbContext database = new();
+            await using Database.DiscordDbContext database = new();
             if (await database.RolesCreated.Where(rd => rd.RoleId == role.ID.Value).AnyAsync().ConfigureAwait(false))
             {
                 return await SendErrorReply("This role is already being tracked").ConfigureAwait(false);
@@ -680,8 +680,8 @@ namespace DiscordBoostRoleBot
                                 ? Result.FromSuccess()
                                 : Result.FromError(result: errResponse);
                         }
-                        await Task.Delay(DeleteOwnerMessageDelay);
-                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                        await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                        deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                         return deleteResponse;
                     }
 
@@ -696,11 +696,11 @@ namespace DiscordBoostRoleBot
                             : Result.FromError(result: errResponse);
                     }
 
-                    await Task.Delay(DeleteOwnerMessageDelay);
-                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
             }
-            await using Database.RoleDataDbContext database = new();
+            await using Database.DiscordDbContext database = new();
             Database.RoleData? roleData = await database.RolesCreated
                 .Where(rd => _context.GuildID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (roleData == null)
@@ -713,8 +713,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
@@ -728,8 +728,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
 
@@ -758,8 +758,8 @@ namespace DiscordBoostRoleBot
                             : Result.FromSuccess();
                     }
 
-                    await Task.Delay(DeleteOwnerMessageDelay);
-                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
                 }
             }
@@ -794,8 +794,8 @@ namespace DiscordBoostRoleBot
                             : Result.FromError(result: errResponse);
                     }
 
-                    await Task.Delay(DeleteOwnerMessageDelay);
-                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
                 }
 
@@ -809,8 +809,8 @@ namespace DiscordBoostRoleBot
                             : Result.FromError(result: errResponse);
                     }
 
-                    await Task.Delay(DeleteOwnerMessageDelay);
-                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                    await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                    deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
                 }
 
@@ -857,8 +857,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
             //If we changed db items and didn't save to the db
@@ -874,8 +874,8 @@ namespace DiscordBoostRoleBot
                         : Result.FromError(result: errResponse);
                 }
 
-                await Task.Delay(DeleteOwnerMessageDelay);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID);
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
 
@@ -888,8 +888,8 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(replyResult);
             }
 
-            await Task.Delay(DeleteOwnerMessageDelay);
-            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, replyResult.Entity.First().ID);
+            await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+            deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, replyResult.Entity.First().ID).ConfigureAwait(false);
             return deleteResponse;
         }
 

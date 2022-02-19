@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace DiscordBoostRoleBot.Migrations
 {
-    [DbContext(typeof(Database.RoleDataDbContext))]
+    [DbContext(typeof(Database.DiscordDbContext))]
     [Migration("20220215001444_ReactSettingsDbCreate")]
     partial class ReactSettingsDbCreate
     {

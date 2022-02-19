@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace DiscordBoostRoleBot.Migrations
 {
-    [DbContext(typeof(Database.RoleDataDbContext))]
+    [DbContext(typeof(Database.DiscordDbContext))]
     partial class RoleDataDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
@@ -60,6 +60,23 @@ namespace DiscordBoostRoleBot.Migrations
                     b.HasKey("RoleId");
 
                     b.ToTable("Roles", (string)null);
+                });
+
+            modelBuilder.Entity("DiscordBoostRoleBot.Database+ServerSettings", b =>
+                {
+                    b.Property<ulong>("ServerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("&");
+
+                    b.HasKey("ServerId");
+
+                    b.ToTable("ServerSettings", (string)null);
                 });
 #pragma warning restore 612, 618
         }
