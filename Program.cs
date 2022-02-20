@@ -227,16 +227,26 @@ namespace DiscordBoostRoleBot
             }
 
             IGuildMember? botOwnerGm = guildBoosters.FirstOrDefault(gb => gb.IsOwner());
+            Database.RoleData? ownerRole;
             if(botOwnerGm is not null)
             {
-                Database.RoleData? ownerRole =
-                    rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
+                ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
                 if (ownerRole is not null)
                 {
                     await CheckBotOwnerRole(serverId, botOwnerGm, ownerRole, ct);
                 }
             }
-            int numRows = await database.SaveChangesAsync(cancellationToken: ct).ConfigureAwait(false);
+
+            int numRows;
+            try
+            {
+                numRows = await database.SaveChangesAsync(cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                log.LogCritical("Error Saving Database {error}", e);
+                throw;
+            }
             if (numRows != peopleRemoved.Count)
             {
                 log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
@@ -260,10 +270,9 @@ namespace DiscordBoostRoleBot
                 //Prepare Image
                 MemoryStream? iconStream = null;
                 IImageFormat? iconFormat = null;
-                if (string.IsNullOrWhiteSpace(roleData.ImageUrl))
+                if (!string.IsNullOrWhiteSpace(roleData.ImageUrl))
                 {
-                    IResult? makeNewRole;
-                    Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult = await RoleCommands.ImageUrlToBase64(imageUrl: roleData.ImageUrl).ConfigureAwait(false);
+                    Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult = await RoleCommands.ImageUrlToBase64(imageUrl: roleData.ImageUrl, ct: ct).ConfigureAwait(false);
                     if (!imageToStreamResult.IsSuccess)
                     {
                         log.LogCritical(imageToStreamResult.Error.Message);
@@ -279,7 +288,7 @@ namespace DiscordBoostRoleBot
                     return false;
                 }
                 IRole role = roleResult.Entity;
-                roleData.RoleUserId = role.ID.Value;
+                roleData.RoleId = role.ID.Value;
                 Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: serverId,
                     userID: botOwnerGm.User.Value.ID, roleID: role.ID,
                     "User is boosting, role request via BoostRoleManager bot", ct: ct).ConfigureAwait(false);

@@ -22,6 +22,7 @@ namespace DiscordBoostRoleBot
         }
         public class RoleData
         {
+            public int EntryId { get; set; }
             public ulong RoleId { get; set; }
             public ulong ServerId { get; set; }
             public ulong RoleUserId { get; set; }
@@ -34,6 +35,7 @@ namespace DiscordBoostRoleBot
             public void Configure(EntityTypeBuilder<RoleData> builder)
             {
                 //Property Specific stuff
+                builder.Property(cl => cl.EntryId).IsRequired().ValueGeneratedOnAdd();
                 builder.Property(cl => cl.ServerId).IsRequired();
                 builder.Property(cl => cl.RoleId).IsRequired();
                 builder.Property(cl => cl.RoleUserId).IsRequired();
@@ -41,7 +43,7 @@ namespace DiscordBoostRoleBot
                 builder.Property(cl => cl.ImageUrl);
                 //Table Stuff
                 builder.ToTable("Roles");
-                builder.HasKey(cl => cl.RoleId );
+                builder.HasKey(cl => new {cl.EntryId, cl.ServerId, cl.RoleUserId});
             }
         }
         public class MessageReactorSettings
