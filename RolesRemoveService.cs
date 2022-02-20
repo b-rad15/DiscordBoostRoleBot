@@ -36,7 +36,7 @@ namespace DiscordBoostRoleBot
                     .Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
                 {
-                    _logger.LogDebug("{guildId}:", guildId);
+                    _logger.LogInformation("{guildId}:", guildId);
                     Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId).ConfigureAwait(false);
                     if (!removeBoosterResult.IsSuccess)
                     {
@@ -58,7 +58,7 @@ namespace DiscordBoostRoleBot
                     {
                         // Already deleted on removal
                         // await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(stoppingToken);
-                        _logger.LogDebug("\tRemoved user {userMention}", userRemoved.User());
+                        _logger.LogInformation("\tRemoved user {userMention}", userRemoved.User());
                     }
                 }
                 await waitTimer;

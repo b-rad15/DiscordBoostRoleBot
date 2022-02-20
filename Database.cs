@@ -20,12 +20,6 @@ namespace DiscordBoostRoleBot
             _logger = logger;
 
         }
-        public class RolesServersSettings
-        {
-            public ulong ServerId { get; set; }
-            //Whether to remove roles after boosts run out
-            public bool ShouldRemoveRoles { get; set; }
-        }
         public class RoleData
         {
             public ulong RoleId { get; set; }
@@ -33,6 +27,7 @@ namespace DiscordBoostRoleBot
             public ulong RoleUserId { get; set; }
             public string Color { get; set; }
             public string Name { get; set; }
+            public string? ImageUrl { get; set; }
         }
         public class RoleDataEntityTypeConfiguration : IEntityTypeConfiguration<RoleData>
         {
@@ -43,6 +38,7 @@ namespace DiscordBoostRoleBot
                 builder.Property(cl => cl.RoleId).IsRequired();
                 builder.Property(cl => cl.RoleUserId).IsRequired();
                 builder.Property(cl => cl.Color).IsRequired();
+                builder.Property(cl => cl.ImageUrl);
                 //Table Stuff
                 builder.ToTable("Roles");
                 builder.HasKey(cl => cl.RoleId );
@@ -98,10 +94,12 @@ namespace DiscordBoostRoleBot
                 optionsBuilder.UseSqlite("Data Source=RolesDatabase.db;")
                     // TODO: Figure out logging
                     // .LogTo(_loggerStatic.LogError)
-                    // .ConfigureWarnings(b=>b.Log(
-                    //     (RelationalEventId.ConnectionOpened, LogLevel.Information),
-                    //     (RelationalEventId.ConnectionClosed, LogLevel.Information)))
                     .UseLoggerFactory(_loggerFactory)
+                    .ConfigureWarnings(b=>b.Log(
+                        (RelationalEventId.ConnectionOpening, LogLevel.Trace),
+                        (RelationalEventId.ConnectionOpened, LogLevel.Trace),
+                        (RelationalEventId.CommandExecuted, LogLevel.Trace),
+                        (RelationalEventId.ConnectionClosed, LogLevel.Trace)))
                     .EnableSensitiveDataLogging()
                     .EnableDetailedErrors();
 

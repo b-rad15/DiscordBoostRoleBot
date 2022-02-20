@@ -124,6 +124,10 @@ namespace DiscordBoostRoleBot {
         {
             return user.ID.Value == Program.Config.BotOwnerId;
         }
+        public static bool IsOwner(this ulong userId)
+        {
+            return userId == Program.Config.BotOwnerId;
+        }
         public static bool IsRoleModAdminOrOwner(this IGuildMember member)
         {
             //Permissions are include in object

@@ -18,6 +18,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Responders;
+using Remora.Rest.Results;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -203,10 +204,16 @@ namespace DiscordBoostRoleBot
             IImageFormat? iconFormat = null;
             if (image_url is not null)
             {
-                IResult? makeNewRole;
-                (iconStream, iconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: image_url).ConfigureAwait(false);
-                if (iconStream is null)
-                    return makeNewRole;
+                Result<(MemoryStream?, IImageFormat?)> imageToStreamResult = await ImageUrlToBase64(imageUrl: image_url).ConfigureAwait(false);
+                if (!imageToStreamResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync(imageToStreamResult.Error.Message);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(errResponse);
+                }
+
+                (iconStream, iconFormat) = imageToStreamResult.Entity;
             }
 
             Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: requestServer, name: role_name, colour: roleColor, icon: iconStream ?? default(Optional<Stream>),
@@ -344,7 +351,7 @@ namespace DiscordBoostRoleBot
         }
 
         //TODO: Convert to Result<(MemoryStream?, IImageFormat?)> or something similar
-        private async Task<(MemoryStream? iconStream, IImageFormat? imageFormat, IResult? makeNewRole)> ImageUrlToBase64(string imageUrl)
+        internal static async Task<Result<(MemoryStream? iconStream, IImageFormat? imageFormat)>> ImageUrlToBase64(string imageUrl, CancellationToken ct = new())
         {
             MemoryStream? iconStream = null;
             //if this isn't the base64, we overwrite it anyway
@@ -353,14 +360,14 @@ namespace DiscordBoostRoleBot
             byte[]? imgData;
             if (Base64Regex.IsMatch(input: dataUri))
             {
-                return (null, null, await SendErrorReply("This is not a url, give an image URL").ConfigureAwait(false));
+                return Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", "This is not a url, give an image URL"));
             }
-
+            
             Result<IReadOnlyList<IMessage>> errResponse;
             try
             {
                 imgData = await Program.httpClient
-                    .GetByteArrayAsync(requestUri: imageUrl, cancellationToken: this.CancellationToken)
+                    .GetByteArrayAsync(requestUri: imageUrl, cancellationToken: ct)
                     .ConfigureAwait(false);
                 imageFormat = Image.DetectFormat(data: imgData);
                 if (imageFormat is not JpegFormat && imageFormat is not PngFormat && imageFormat is not GifFormat)
@@ -370,27 +377,17 @@ namespace DiscordBoostRoleBot
                         Image? imgToConvert = Image.Load(imgData);
                         if (imgToConvert is null)
                         {
-                            errResponse = await _feedbackService.SendContextualErrorAsync(
-                                    $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
-                                .ConfigureAwait(false);
-                            return (iconStream, imageFormat, !errResponse.IsSuccess
-                                ? Result.FromError(result: errResponse)
-                                : Result.FromSuccess());
+                            Result<(MemoryStream?, IImageFormat?)> imgConvFailResult = Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"Format {imageFormat.Name} is not allowed please convert to JPG or PNG"));
+                            return imgConvFailResult;
                         }
 
                         iconStream = new MemoryStream();
-                        await imgToConvert.SaveAsync(iconStream, new PngEncoder()).ConfigureAwait(false);
+                        await imgToConvert.SaveAsync(iconStream, new PngEncoder(), ct).ConfigureAwait(false);
                         iconStream.Position = 0;
-
                     }
                     catch
                     {
-                        errResponse = await _feedbackService.SendContextualErrorAsync(
-                                $"format {imageFormat.Name} is not allowed please convert to JPG or PNG")
-                            .ConfigureAwait(false);
-                        return (iconStream, imageFormat, !errResponse.IsSuccess
-                            ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
-                            : Result.FromSuccess());
+                        return Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"Format {imageFormat.Name} is not allowed please convert to JPG or PNG"));
                     }
 
                 }
@@ -405,26 +402,22 @@ namespace DiscordBoostRoleBot
             }
             catch (Exception e)
             {
-                _log.LogWarning(e.ToString());
-                errResponse = await _feedbackService.SendContextualErrorAsync(
-                        $"{imageUrl} is an invalid url, make sure that you can load this in a browser and that it is a link directly to an image (i.e. not an image on a website)")
-                    .ConfigureAwait(false);
-                return (iconStream, imageFormat, !errResponse.IsSuccess
-                    ? Result.FromError<IReadOnlyList<IMessage>>(result: errResponse)
-                    : Result.FromSuccess());
+                Program.log.LogWarning(e.ToString());
+                return Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"{imageUrl} is an invalid url, make sure that you can load this in a browser and that it is a link directly to an image (i.e. not an image on a website)"));
             }
 
             // _log.LogInformation("Data Stream : {stream}", new MemoryStream(Encoding.UTF8.GetBytes(dataUri)).);
             // iconStream = new MemoryStream(Encoding.UTF8.GetBytes(s: dataUri));
             // BitConverter.GetBytes(9894494448401390090).CopyTo(imgData, 0);
 
-            return (iconStream, imageFormat, null);
+            return Result<(MemoryStream? iconStream, IImageFormat? imageFormat)>.FromSuccess((iconStream, imageFormat));
         }
 
         [Command("untrack-role")]
         [Description("Stops the bot from managing this role")]
         public async Task<IResult> UntrackRole([Description("The role to stop tracking")] IRole role, [Description("Whether the role should be deleted")] bool delete_role = true)
         {
+            Result<IReadOnlyList<IMessage>> replyResult;
             IGuildMember member;
             Result<IReadOnlyList<IMessage>> errResponse;
             switch (_context)
@@ -459,12 +452,29 @@ namespace DiscordBoostRoleBot
             }
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
-            if (_context.User.ID != member.User.Value.ID && !member.IsRoleModAdminOrOwner())
+            await using Database.DiscordDbContext database = new();
+            var roleCreated = await database.RolesCreated.Where(rc =>
+                rc.ServerId == _context.GuildID.Value.Value && rc.RoleId == role.ID.Value).FirstOrDefaultAsync();
+            if (roleCreated is null)
+            {
+                replyResult = await _feedbackService.SendContextualErrorAsync(
+                    $"Role {role.Mention()} not found in database, make sure it was created using the bot or added using /track-role",
+                    ct: this.CancellationToken).ConfigureAwait(false);
+                return !replyResult.IsSuccess
+                    ? Result.FromError(replyResult)
+                    : Result.FromSuccess();
+            }
+
+            if (roleCreated.RoleUserId.IsOwner() && !_context.User.IsOwner())
+            {
+                _log.LogCritical("{executeUser} tried to remove role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleCreated.RoleUserId).User(), _context.GuildID.Value.Value);
+                return await SendErrorReply("You really gonna do that?");
+            }
+            if (roleCreated.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
             (int result, ulong ownerId) = await Database.RemoveRoleFromDatabase(role).ConfigureAwait(false);
-            Result<IReadOnlyList<IMessage>> replyResult;
             switch (result)
             {
                 case -1:
@@ -717,8 +727,14 @@ namespace DiscordBoostRoleBot
                 deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
+
+            if (roleData.RoleUserId.IsOwner() && !_context.User.IsOwner())
+            {
+                _log.LogCritical("{executeUser} tried to modify role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleData.RoleUserId).User(), _context.GuildID.Value.Value);
+                return await SendErrorReply("You really gonna do that?");
+            }
             //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
-            if (_context.User.ID != member.User.Value.ID && !member.IsRoleModAdminOrOwner())
+            if (roleData.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
                 if (!_context.User.IsOwner() || !errResponse.IsSuccess)
@@ -814,17 +830,17 @@ namespace DiscordBoostRoleBot
                     return deleteResponse;
                 }
 
-                IResult? makeNewRole;
                 MemoryStream? newIconStream = null;
-                (newIconStream, newIconFormat, makeNewRole) = await ImageUrlToBase64(imageUrl: new_image).ConfigureAwait(false);
-                if (newIconStream is null)
+                Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult = await ImageUrlToBase64(imageUrl: new_image).ConfigureAwait(false);
+                if (!imageToStreamResult.IsSuccess)
                 {
-                    //If this is null, there was no error so just assume image not valid
-                    if (makeNewRole != null)
-                    {
-                        return makeNewRole;
-                    }
+                    errResponse = await _feedbackService.SendContextualErrorAsync(imageToStreamResult.Error.Message);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(errResponse);
                 }
+
+                (newIconStream, newIconFormat) = imageToStreamResult.Entity;
                 modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
@@ -846,7 +862,7 @@ namespace DiscordBoostRoleBot
                 if (modifyRoleResult.Error.Message == "Unknown or unsupported image format.")
                 {
                     return await SendErrorReply(
-                        $"format {newIconFormat.Name} rejected by discord please convert to JPG or PNG").ConfigureAwait(false);
+                        $"Format {newIconFormat?.Name} rejected by discord please convert to JPG or PNG").ConfigureAwait(false);
                 }
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not modify {role.Mention()} check that the bot has the correct permissions").ConfigureAwait(false);
