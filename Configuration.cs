@@ -8,6 +8,7 @@ namespace DiscordBoostRoleBot
         public string Token { get; set; } = null!;
         public ulong? TestServerId { get; set; }
         public ulong? BotOwnerId { get; set; }
+        public double? RemoveRoleIntervalMinutes { get; set; }
 
         public static Configuration ReadConfig(string configPath = "config.json")
         {

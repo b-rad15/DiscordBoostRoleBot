@@ -17,7 +17,7 @@ namespace DiscordBoostRoleBot
             _logger = logger;
         }
 
-        private readonly TimeSpan _executeInterval = TimeSpan.FromMinutes(30);
+        private readonly TimeSpan _executeInterval = TimeSpan.FromMinutes(Program.Config.RemoveRoleIntervalMinutes.HasValue ? Program.Config.RemoveRoleIntervalMinutes.Value : 5);
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!Program.IsInitialized())
