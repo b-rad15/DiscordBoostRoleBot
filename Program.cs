@@ -227,15 +227,15 @@ namespace DiscordBoostRoleBot
                 peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
             }
 
-            IGuildMember? botOwnerGm = guildBoosters.FirstOrDefault(gb => gb.IsOwner());
-            if(botOwnerGm is not null)
-            {
-                Database.RoleData? ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
-                if (ownerRole is not null)
-                {
-                    await CheckBotOwnerRole(serverId, botOwnerGm, ownerRole, ct);
-                }
-            }
+            // IGuildMember? botOwnerGm = guildBoosters.FirstOrDefault(gb => gb.IsOwner());
+            // if(botOwnerGm is not null)
+            // {
+            //     Database.RoleData? ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
+            //     if (ownerRole is not null)
+            //     {
+            //         await CheckBotOwnerRole(serverId, botOwnerGm, ownerRole, ct);
+            //     }
+            // }
 
             int numRows;
             try
