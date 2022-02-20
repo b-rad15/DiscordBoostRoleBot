@@ -37,7 +37,7 @@ namespace DiscordBoostRoleBot
                 foreach (Snowflake guildId in guildIds)
                 {
                     _logger.LogInformation("{guildId}:", guildId);
-                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId).ConfigureAwait(false);
+                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId, stoppingToken).ConfigureAwait(false);
                     if (!removeBoosterResult.IsSuccess)
                     {
                         if (removeBoosterResult.Error.Message.Contains("inner"))

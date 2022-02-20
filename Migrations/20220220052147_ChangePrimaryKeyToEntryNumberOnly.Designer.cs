@@ -2,6 +2,7 @@
 using DiscordBoostRoleBot;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -9,9 +10,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DiscordBoostRoleBot.Migrations
 {
     [DbContext(typeof(Database.DiscordDbContext))]
-    partial class RoleDataDbContextModelSnapshot : ModelSnapshot
+    [Migration("20220220052147_ChangePrimaryKeyToEntryNumberOnly")]
+    partial class ChangePrimaryKeyToEntryNumberOnly
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "6.0.2");
@@ -45,9 +47,6 @@ namespace DiscordBoostRoleBot.Migrations
 
                     b.Property<string>("Color")
                         .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ImageHash")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ImageUrl")

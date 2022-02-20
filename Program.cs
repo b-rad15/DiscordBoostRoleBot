@@ -2,6 +2,7 @@
 
 using System.Drawing;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Text.Encodings.Web;
 using Humanizer;
 using Microsoft.EntityFrameworkCore;
@@ -227,10 +228,9 @@ namespace DiscordBoostRoleBot
             }
 
             IGuildMember? botOwnerGm = guildBoosters.FirstOrDefault(gb => gb.IsOwner());
-            Database.RoleData? ownerRole;
             if(botOwnerGm is not null)
             {
-                ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
+                Database.RoleData? ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
                 if (ownerRole is not null)
                 {
                     await CheckBotOwnerRole(serverId, botOwnerGm, ownerRole, ct);
@@ -247,7 +247,7 @@ namespace DiscordBoostRoleBot
                 log.LogCritical("Error Saving Database {error}", e);
                 throw;
             }
-            if (numRows != peopleRemoved.Count)
+            if (numRows != peopleRemoved.Count && numRows-1 != peopleRemoved.Count)
             {
                 log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
             }
@@ -287,6 +287,8 @@ namespace DiscordBoostRoleBot
                     log.LogError($"Could not create role for {botOwnerGm.User.Value.Mention()} because {roleResult.Error}");
                     return false;
                 }
+
+                roleData.ImageHash = roleResult.Entity.Icon.Value?.Value;
                 IRole role = roleResult.Entity;
                 roleData.RoleId = role.ID.Value;
                 Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: serverId,
@@ -309,8 +311,7 @@ namespace DiscordBoostRoleBot
                     {
                         IUser currentBotUser = currentBotUserResult.Entity;
                         Result<IGuildMember> currentBotMemberResult =
-                            await _restGuildApi.GetGuildMemberAsync(serverId, currentBotUser.ID,
-                                ct).ConfigureAwait(false);
+                            await _restGuildApi.GetGuildMemberAsync(serverId, currentBotUser.ID, ct).ConfigureAwait(false);
                         if (currentBotMemberResult.IsSuccess)
                         {
                             IGuildMember currentBotMember = currentBotMemberResult.Entity;
@@ -349,6 +350,79 @@ namespace DiscordBoostRoleBot
 
                 log.LogInformation($"Made Role {role.Mention()} and assigned to {botOwnerGm.Mention()}");
                 return true;
+            }
+            else
+            {
+                Color? newRoleColor = null;
+                if (ColorTranslator.FromHtml(roleData.Color).ToArgb() != ownerRole.Colour.ToArgb())
+                {
+                    newRoleColor = ColorTranslator.FromHtml(roleData.Color);
+                }
+
+                MemoryStream? imageStream = null;
+                string? imageEmoji = null;
+                if (roleData.ImageUrl is not null)
+                {
+                    if (RoleCommands.IsUnicodeOrEmoji(roleData.ImageUrl))
+                    {
+                        if (!ownerRole.UnicodeEmoji.HasValue || ownerRole.UnicodeEmoji.Value != roleData.ImageUrl)
+                        {
+                            imageEmoji = roleData.ImageUrl;
+                        }
+                    }
+                    else
+                    {
+                        if (roleData.ImageHash is null || !ownerRole.Icon.HasValue ||
+                            ownerRole.Icon.Value?.Value != roleData.ImageHash)
+                        {
+                            Result<(MemoryStream?, IImageFormat?)> imageToStreamResult = await RoleCommands.ImageUrlToBase64(roleData.ImageUrl, ct);
+                            if (!imageToStreamResult.IsSuccess)
+                            {
+                                log.LogCritical("Cannot convert image {imageUrl} to stream", roleData.ImageUrl);
+                                imageStream = null;
+                            }
+
+                            (imageStream, _) = imageToStreamResult.Entity;
+                        }
+                    }
+                }
+
+                string? newName = null;
+                if (roleData.Name != ownerRole.Name)
+                {
+                    newName = roleData.Name;
+                }
+
+                if (newRoleColor is not null || imageStream is not null || imageEmoji is not null || newName is not null)
+                {
+                    Result<IRole> modifyRoleResult;
+                    if (imageEmoji is not null)
+                    {
+                        modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(serverId, ownerRole.ID,
+                            newName ?? default(Optional<string?>),
+                            color: newRoleColor ?? default(Optional<Color?>),
+                            unicodeEmoji: imageEmoji,
+                            reason: $"You changed my role?", ct: ct).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(serverId, ownerRole.ID,
+                            newName ?? default(Optional<string?>),
+                            color: newRoleColor ?? default(Optional<Color?>),
+                            icon: imageStream ?? default(Optional<Stream?>),
+                            reason: $"You changed my role?", ct: ct).ConfigureAwait(false);
+                    }
+
+                    if (!modifyRoleResult.IsSuccess)
+                    {
+                        log.LogCritical("Role Fix Failed in {server}", serverId);
+                    }
+                    else
+                    {
+                        log.LogInformation("Role fixed in {server}", serverId);
+                    }
+                }
+                log.LogDebug("Role not changed in {server}", serverId);
             }
 
             return true;

@@ -29,6 +29,7 @@ namespace DiscordBoostRoleBot
             public string Color { get; set; }
             public string Name { get; set; }
             public string? ImageUrl { get; set; }
+            public string? ImageHash { get; set; }
         }
         public class RoleDataEntityTypeConfiguration : IEntityTypeConfiguration<RoleData>
         {
@@ -41,9 +42,10 @@ namespace DiscordBoostRoleBot
                 builder.Property(cl => cl.RoleUserId).IsRequired();
                 builder.Property(cl => cl.Color).IsRequired();
                 builder.Property(cl => cl.ImageUrl);
+                builder.Property(cl => cl.ImageHash);
                 //Table Stuff
                 builder.ToTable("Roles");
-                builder.HasKey(cl => new {cl.EntryId, cl.ServerId, cl.RoleUserId});
+                builder.HasKey(cl => cl.EntryId);
             }
         }
         public class MessageReactorSettings
@@ -100,6 +102,7 @@ namespace DiscordBoostRoleBot
                     .ConfigureWarnings(b=>b.Log(
                         (RelationalEventId.ConnectionOpening, LogLevel.Trace),
                         (RelationalEventId.ConnectionOpened, LogLevel.Trace),
+                        (RelationalEventId.CommandCreating, LogLevel.Trace),
                         (RelationalEventId.CommandExecuted, LogLevel.Trace),
                         (RelationalEventId.ConnectionClosed, LogLevel.Trace)))
                     .EnableSensitiveDataLogging()
@@ -113,7 +116,7 @@ namespace DiscordBoostRoleBot
             }
 
         }
-        public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name, string? imageUrl = null)
+        public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name, string? imageUrl = null, string? imageHash = null)
         {
             RoleData roleData = new()
             {
@@ -122,7 +125,8 @@ namespace DiscordBoostRoleBot
                 RoleId = roleId,
                 Color = color,
                 Name = name,
-                ImageUrl = imageUrl
+                ImageUrl = imageUrl,
+                ImageHash = imageHash
             };
             await using DiscordDbContext database = new();
             database.Add(roleData);

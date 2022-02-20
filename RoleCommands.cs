@@ -236,7 +236,7 @@ namespace DiscordBoostRoleBot
             }
             IRole role = roleResult.Entity;
             bool addedToDb = await Database.AddRoleToDatabase(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value,
-                role.ID.Value, color, role.Name, image_url).ConfigureAwait(false);
+                role.ID.Value, color: color, name: role.Name, imageUrl: image_url, role.Icon.HasValue ? role.Icon.Value?.Value : null).ConfigureAwait(false);
             if (!addedToDb)
             {
                 _log.LogError($"Could not add role to database");
@@ -351,7 +351,7 @@ namespace DiscordBoostRoleBot
         }
 
         //TODO: Convert to Result<(MemoryStream?, IImageFormat?)> or something similar
-        internal static async Task<Result<(MemoryStream? iconStream, IImageFormat? imageFormat)>> ImageUrlToBase64(string imageUrl, CancellationToken ct = new())
+        internal static async Task<Result<(MemoryStream?, IImageFormat?)>> ImageUrlToBase64(string imageUrl, CancellationToken ct = new())
         {
             MemoryStream? iconStream = null;
             //if this isn't the base64, we overwrite it anyway
@@ -788,6 +788,7 @@ namespace DiscordBoostRoleBot
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
                     reason: $"Member requested to modify role").ConfigureAwait(false);
+                roleData.ImageHash = null;
             }
             else if (IsUnicodeOrEmoji(new_image))
             {
@@ -796,6 +797,7 @@ namespace DiscordBoostRoleBot
                     color: newRoleColor ?? default(Optional<Color?>),
                     unicodeEmoji: new_image,
                     reason: $"Member requested to modify role").ConfigureAwait(false);
+                roleData.ImageHash = null;
             } else
             {
                 //Get guild info to tell premium tier
@@ -847,14 +849,11 @@ namespace DiscordBoostRoleBot
                     color: newRoleColor ?? default(Optional<Color?>),
                     icon: newIconStream ?? default(Optional<Stream?>),
                     reason: $"Member requested to modify role").ConfigureAwait(false);
-            
-            }
 
-            // Stream? imgStream = new_image is not null
-            //     ? await Program.httpClient
-            //         .GetStreamAsync(requestUri: new_image, cancellationToken: this.CancellationToken)
-            //         .ConfigureAwait(false)
-            //     : null;
+                roleData.ImageHash = modifyRoleResult.IsSuccess ? modifyRoleResult.Entity.Icon.Value?.Value : null;
+
+            }
+            
             Result<IReadOnlyList<IMessage>> replyResult;
             if (!modifyRoleResult.IsSuccess)
             {
@@ -910,7 +909,7 @@ namespace DiscordBoostRoleBot
             return deleteResponse;
         }
 
-        private static bool IsUnicodeOrEmoji(string newImage)
+        public static bool IsUnicodeOrEmoji(string newImage)
         {
             return (newImage.Length == 1 || (newImage.StartsWith(':') && newImage.EndsWith(':')));
         }
