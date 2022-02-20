@@ -254,7 +254,8 @@ namespace DiscordBoostRoleBot
             return Result<List<Snowflake>>.FromSuccess(peopleRemoved);
         }
 
-        internal static async Task<Result<bool>> CheckBotOwnerRole(Snowflake serverId, IGuildMember botOwnerGm, Database.RoleData roleData, CancellationToken ct = new())
+        internal static async Task<Result<bool>> CheckBotOwnerRole(Snowflake serverId, IGuildMember botOwnerGm,
+            Database.RoleData roleData, CancellationToken ct = new())
         {
             Result<IReadOnlyList<IRole>> rolesResponse = await _restGuildApi!.GetGuildRolesAsync(serverId, ct);
             if (!rolesResponse.IsSuccess)
@@ -272,7 +273,8 @@ namespace DiscordBoostRoleBot
                 IImageFormat? iconFormat = null;
                 if (!string.IsNullOrWhiteSpace(roleData.ImageUrl))
                 {
-                    Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult = await RoleCommands.ImageUrlToBase64(imageUrl: roleData.ImageUrl, ct: ct).ConfigureAwait(false);
+                    Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult =
+                        await RoleCommands.ImageUrlToBase64(imageUrl: roleData.ImageUrl, ct: ct).ConfigureAwait(false);
                     if (!imageToStreamResult.IsSuccess)
                     {
                         log.LogCritical(imageToStreamResult.Error.Message);
@@ -281,10 +283,15 @@ namespace DiscordBoostRoleBot
 
                     (iconStream, iconFormat) = imageToStreamResult.Entity;
                 }
-                Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: serverId, name: roleData.Name, colour: ColorTranslator.FromHtml(roleData.Color), icon: iconStream ?? default(Optional<Stream>), isHoisted: false, isMentionable: true, ct: ct).ConfigureAwait(false);
+
+                Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: serverId,
+                        name: roleData.Name, colour: ColorTranslator.FromHtml(roleData.Color),
+                        icon: iconStream ?? default(Optional<Stream>), isHoisted: false, isMentionable: true, ct: ct)
+                    .ConfigureAwait(false);
                 if (!roleResult.IsSuccess)
                 {
-                    log.LogError($"Could not create role for {botOwnerGm.User.Value.Mention()} because {roleResult.Error}");
+                    log.LogError(
+                        $"Could not create role for {botOwnerGm.User.Value.Mention()} because {roleResult.Error}");
                     return false;
                 }
 
@@ -296,12 +303,13 @@ namespace DiscordBoostRoleBot
                     "User is boosting, role request via BoostRoleManager bot", ct: ct).ConfigureAwait(false);
                 if (!roleApplyResult.IsSuccess)
                 {
-                    log.LogError($"Could not make role because {roleApplyResult.Error}");
+                    log.LogError($"Could not apply role because {roleApplyResult.Error}");
                     return false;
                 }
 
                 string msg = "";
-                Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildApi.GetGuildRolesAsync(serverId, ct: ct).ConfigureAwait(false);
+                Result<IReadOnlyList<IRole>> getRolesResult =
+                    await _restGuildApi.GetGuildRolesAsync(serverId, ct: ct).ConfigureAwait(false);
                 if (getRolesResult.IsSuccess)
                 {
                     IReadOnlyList<IRole> guildRoles = getRolesResult.Entity;
@@ -311,41 +319,47 @@ namespace DiscordBoostRoleBot
                     {
                         IUser currentBotUser = currentBotUserResult.Entity;
                         Result<IGuildMember> currentBotMemberResult =
-                            await _restGuildApi.GetGuildMemberAsync(serverId, currentBotUser.ID, ct).ConfigureAwait(false);
+                            await _restGuildApi.GetGuildMemberAsync(serverId, currentBotUser.ID, ct)
+                                .ConfigureAwait(false);
                         if (currentBotMemberResult.IsSuccess)
                         {
                             IGuildMember currentBotMember = currentBotMemberResult.Entity;
-                            IEnumerable<IRole> botRoles = guildRoles.Where(gr => currentBotMember.Roles.Contains(gr.ID));
+                            IEnumerable<IRole> botRoles =
+                                guildRoles.Where(gr => currentBotMember.Roles.Contains(gr.ID));
                             IRole? maxPosRole = botRoles.MaxBy(br => br.Position);
                             log.LogDebug("Bot's highest role is {role_name}: {roleId}", maxPosRole.Name, maxPosRole.ID);
                             int maxPos = maxPosRole.Position;
                             Result<IReadOnlyList<IRole>> roleMovePositionResult = await _restGuildApi
                                 .ModifyGuildRolePositionsAsync(serverId,
-                                    new (Snowflake RoleID, Optional<int?> Position)[] { (role.ID, maxPos) }, ct: ct).ConfigureAwait(false);
+                                    new (Snowflake RoleID, Optional<int?> Position)[] { (role.ID, maxPos) }, ct: ct)
+                                .ConfigureAwait(false);
                             if (!roleMovePositionResult.IsSuccess)
                             {
                                 log.LogWarning($"Could not move the role because {roleMovePositionResult.Error}");
                                 return false;
                             }
 
-                            log.LogDebug(roleMovePositionResult.ToString());
+                            log.LogInformation("Move role to position {pos}", roleMovePositionResult.ToString());
                         }
                         else
                         {
                             log.LogWarning($"Could not get bot member because {currentBotMemberResult.Error}");
-                            msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
+                            msg +=
+                                "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                         }
                     }
                     else
                     {
                         log.LogWarning($"Could not get bot user because {currentBotUserResult.Error}");
-                        msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
+                        msg +=
+                            "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                     }
                 }
                 else
                 {
                     log.LogWarning($"Could not move the role because {getRolesResult.Error}");
-                    msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
+                    msg +=
+                        "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                 }
 
                 log.LogInformation($"Made Role {role.Mention()} and assigned to {botOwnerGm.Mention()}");
@@ -375,7 +389,8 @@ namespace DiscordBoostRoleBot
                         if (roleData.ImageHash is null || !ownerRole.Icon.HasValue ||
                             ownerRole.Icon.Value?.Value != roleData.ImageHash)
                         {
-                            Result<(MemoryStream?, IImageFormat?)> imageToStreamResult = await RoleCommands.ImageUrlToBase64(roleData.ImageUrl, ct);
+                            Result<(MemoryStream?, IImageFormat?)> imageToStreamResult =
+                                await RoleCommands.ImageUrlToBase64(roleData.ImageUrl, ct);
                             if (!imageToStreamResult.IsSuccess)
                             {
                                 log.LogCritical("Cannot convert image {imageUrl} to stream", roleData.ImageUrl);
@@ -393,7 +408,8 @@ namespace DiscordBoostRoleBot
                     newName = roleData.Name;
                 }
 
-                if (newRoleColor is not null || imageStream is not null || imageEmoji is not null || newName is not null)
+                if (newRoleColor is not null || imageStream is not null || imageEmoji is not null ||
+                    newName is not null)
                 {
                     Result<IRole> modifyRoleResult;
                     if (imageEmoji is not null)
@@ -425,11 +441,73 @@ namespace DiscordBoostRoleBot
                             : null;
                     }
                 }
+
                 log.LogInformation("Role not changed in {server}", serverId);
+                if (!botOwnerGm.Roles.Contains(new Snowflake(roleData.RoleId)))
+                {
+                    Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: serverId,
+                        userID: botOwnerGm.User.Value.ID, roleID: ownerRole.ID,
+                        "User is boosting, role request via BoostRoleManager bot", ct: ct).ConfigureAwait(false);
+                    if (!roleApplyResult.IsSuccess)
+                    {
+                        log.LogError($"Could not apply role because {roleApplyResult.Error}");
+                        return false;
+                    }
+
+                    log.LogInformation("Reapplied role in {server}", serverId);
+                }
+
+                Result<IReadOnlyList<IRole>> getRolesResult =
+                    await _restGuildApi.GetGuildRolesAsync(serverId, ct: ct).ConfigureAwait(false);
+                if (getRolesResult.IsSuccess)
+                {
+                    IReadOnlyList<IRole> guildRoles = getRolesResult.Entity;
+                    Result<IUser> currentBotUserResult =
+                        await _restUserApi.GetCurrentUserAsync(ct: ct).ConfigureAwait(false);
+                    if (currentBotUserResult.IsSuccess)
+                    {
+                        IUser currentBotUser = currentBotUserResult.Entity;
+                        Result<IGuildMember> currentBotMemberResult =
+                            await _restGuildApi.GetGuildMemberAsync(serverId, currentBotUser.ID, ct)
+                                .ConfigureAwait(false);
+                        if (currentBotMemberResult.IsSuccess)
+                        {
+                            IGuildMember currentBotMember = currentBotMemberResult.Entity;
+                            IEnumerable<IRole> botRoles =
+                                guildRoles.Where(gr => currentBotMember.Roles.Contains(gr.ID));
+                            IRole? maxPosRole = botRoles.MaxBy(br => br.Position);
+                            if (maxPosRole != null && ownerRole.Position < maxPosRole.Position - 1)
+                            {
+                                log.LogDebug("Bot's highest role is {role_name}: {roleId}", maxPosRole.Name,
+                                    maxPosRole.ID);
+                                int maxPos = maxPosRole.Position;
+                                Result<IReadOnlyList<IRole>> roleMovePositionResult = await _restGuildApi
+                                    .ModifyGuildRolePositionsAsync(serverId,
+                                        new (Snowflake RoleID, Optional<int?> Position)[] { (ownerRole.ID, maxPos) },
+                                        ct: ct).ConfigureAwait(false);
+                                if (!roleMovePositionResult.IsSuccess)
+                                {
+                                    log.LogWarning($"Could not move the role because {roleMovePositionResult.Error}");
+                                    return false;
+                                }
+
+                                log.LogDebug(roleMovePositionResult.ToString());
+                            }
+                        }
+                        else
+                        {
+                            log.LogWarning($"Could not get bot member because {currentBotMemberResult.Error}");
+                        }
+                    }
+                    else
+                    {
+                        log.LogWarning($"Could not get bot user because {currentBotUserResult.Error}");
+                    }
+                }
+
+                return true;
+
             }
-
-            return true;
-
         }
 
         /// <summary>
