@@ -195,7 +195,7 @@ namespace DiscordBoostRoleBot
             Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(serverId, checkIsBoosting: true).ConfigureAwait(false);
             if (!guildBoostersResult.IsSuccess)
             {
-                log.LogError("Could not get guild members for guild {guild} because {reason}", serverId, guildBoostersResult.Error.Message);
+                log.LogWarning("Could not get guild members for guild {guild} because {reason}", serverId, guildBoostersResult.Error.Message);
                 return Result<List<Snowflake>>.FromError(guildBoostersResult.Error);
             }
 
