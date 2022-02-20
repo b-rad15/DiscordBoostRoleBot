@@ -111,7 +111,7 @@ namespace DiscordBoostRoleBot
             }
 
         }
-        public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name)
+        public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name, string? imageUrl = null)
         {
             RoleData roleData = new()
             {
@@ -119,7 +119,8 @@ namespace DiscordBoostRoleBot
                 RoleUserId = userId,
                 RoleId = roleId,
                 Color = color,
-                Name = name
+                Name = name,
+                ImageUrl = imageUrl
             };
             await using DiscordDbContext database = new();
             database.Add(roleData);

@@ -236,7 +236,7 @@ namespace DiscordBoostRoleBot
             }
             IRole role = roleResult.Entity;
             bool addedToDb = await Database.AddRoleToDatabase(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value,
-                role.ID.Value, color, role.Name).ConfigureAwait(false);
+                role.ID.Value, color, role.Name, image_url).ConfigureAwait(false);
             if (!addedToDb)
             {
                 _log.LogError($"Could not add role to database");
@@ -841,6 +841,7 @@ namespace DiscordBoostRoleBot
                 }
 
                 (newIconStream, newIconFormat) = imageToStreamResult.Entity;
+                roleData.ImageUrl = new_image;
                 modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
                     color: newRoleColor ?? default(Optional<Color?>),
