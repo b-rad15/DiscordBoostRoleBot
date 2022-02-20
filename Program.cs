@@ -420,9 +420,12 @@ namespace DiscordBoostRoleBot
                     else
                     {
                         log.LogInformation("Role fixed in {server}", serverId);
+                        roleData.ImageHash = modifyRoleResult.Entity.Icon.HasValue
+                            ? modifyRoleResult.Entity.Icon.Value?.Value
+                            : null;
                     }
                 }
-                log.LogDebug("Role not changed in {server}", serverId);
+                log.LogInformation("Role not changed in {server}", serverId);
             }
 
             return true;

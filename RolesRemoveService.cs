@@ -51,7 +51,7 @@ namespace DiscordBoostRoleBot
                     List<Snowflake> usersRemoved = removeBoosterResult.Entity;
                     if (usersRemoved.Count == 0)
                     {
-                        _logger.LogDebug("None removed");
+                        _logger.LogInformation("\tNone removed");
                         continue;
                     }
                     foreach (Snowflake userRemoved in usersRemoved)
