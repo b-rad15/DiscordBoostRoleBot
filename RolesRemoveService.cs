@@ -42,9 +42,9 @@ namespace DiscordBoostRoleBot
                     {
                         if (removeBoosterResult.Error.Message.Contains("inner"))
                         {
-                            _logger.LogError("Failed {server} because {error}", guildId.Value, removeBoosterResult.Inner!.Error);
+                            _logger.LogWarning("Failed {server} because {error}", guildId.Value, removeBoosterResult.Inner!.Error);
                         }
-                        _logger.LogError("Could not remove booster role for server {server} because {error}", guildId.Value, removeBoosterResult.Error.Message);
+                        _logger.LogWarning("Could not remove booster role for server {server} because {error}", guildId.Value, removeBoosterResult.Error.Message);
                         continue;
                     }
 
