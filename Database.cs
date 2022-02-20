@@ -103,6 +103,7 @@ namespace DiscordBoostRoleBot
                         (RelationalEventId.ConnectionOpening, LogLevel.Trace),
                         (RelationalEventId.ConnectionOpened, LogLevel.Trace),
                         (RelationalEventId.CommandCreating, LogLevel.Trace),
+                        (CoreEventId.ContextInitialized, LogLevel.Trace),
                         (RelationalEventId.CommandExecuted, LogLevel.Trace),
                         (RelationalEventId.ConnectionClosed, LogLevel.Trace)))
                     .EnableSensitiveDataLogging()
