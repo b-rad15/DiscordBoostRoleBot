@@ -465,11 +465,11 @@ namespace DiscordBoostRoleBot
                     : Result.FromSuccess();
             }
 
-            if (roleCreated.RoleUserId.IsOwner() && !_context.User.IsOwner())
-            {
-                _log.LogCritical("{executeUser} tried to remove role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleCreated.RoleUserId).User(), _context.GuildID.Value.Value);
-                return await SendErrorReply("You really gonna do that?");
-            }
+            // if (roleCreated.RoleUserId.IsOwner() && !_context.User.IsOwner())
+            // {
+            //     _log.LogCritical("{executeUser} tried to remove role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleCreated.RoleUserId).User(), _context.GuildID.Value.Value);
+            //     return await SendErrorReply("You really gonna do that?");
+            // }
             if (roleCreated.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
@@ -728,12 +728,12 @@ namespace DiscordBoostRoleBot
                 return deleteResponse;
             }
 
-            if (roleData.RoleUserId.IsOwner() && !_context.User.IsOwner())
-            {
-                _log.LogCritical("{executeUser} tried to modify role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleData.RoleUserId).User(), _context.GuildID.Value.Value);
-                return await SendErrorReply("You really gonna do that?");
-            }
-            //If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
+            // if (roleData.RoleUserId.IsOwner() && !_context.User.IsOwner())
+            // {
+            //     _log.LogCritical("{executeUser} tried to modify role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleData.RoleUserId).User(), _context.GuildID.Value.Value);
+            //     return await SendErrorReply("You really gonna do that?");
+            // }
+            // If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
             if (roleData.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
