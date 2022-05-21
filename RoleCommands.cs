@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ using Image = SixLabors.ImageSharp.Image;
 
 namespace DiscordBoostRoleBot
 {
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
     public class RoleCommands : CommandGroup
     {
         private readonly FeedbackService _feedbackService;
@@ -35,7 +37,7 @@ namespace DiscordBoostRoleBot
         private readonly IDiscordRestGuildAPI _restGuildApi;
         private readonly IDiscordRestUserAPI _restUserApi;
         private readonly IDiscordRestChannelAPI _restChannelApi;
-        private readonly ILogger<Program> _log;
+        private readonly ILogger<RoleCommands> _log;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RoleCommands"/> class.
@@ -46,7 +48,7 @@ namespace DiscordBoostRoleBot
         /// <param name="log">The logger used</param>
         /// <param name="restUserApi">Access to the User rest API</param>
         /// <param name="restChannelApi">Access to the Channel rest API</param>
-        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<Program> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi)
+        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<RoleCommands> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi)
         {
             _feedbackService = feedbackService;
             _context = context;
@@ -370,11 +372,17 @@ namespace DiscordBoostRoleBot
                     .GetByteArrayAsync(requestUri: imageUrl, cancellationToken: ct)
                     .ConfigureAwait(false);
                 imageFormat = Image.DetectFormat(data: imgData);
+                
                 if (imageFormat is not JpegFormat && imageFormat is not PngFormat && imageFormat is not GifFormat)
                 {
                     try
                     {
                         Image? imgToConvert = Image.Load(imgData);
+                        if (imgToConvert.Height != imgToConvert.Width)
+                        {
+                            return Result<(MemoryStream?, IImageFormat?)>.FromError(
+                                new ArgumentInvalidError("Image Url", "Image is not square"));
+                        }
                         if (imgToConvert is null)
                         {
                             Result<(MemoryStream?, IImageFormat?)> imgConvFailResult = Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"Format {imageFormat.Name} is not allowed please convert to JPG or PNG"));
@@ -406,9 +414,12 @@ namespace DiscordBoostRoleBot
                 return Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"{imageUrl} is an invalid url, make sure that you can load this in a browser and that it is a link directly to an image (i.e. not an image on a website)"));
             }
 
-            // _log.LogInformation("Data Stream : {stream}", new MemoryStream(Encoding.UTF8.GetBytes(dataUri)).);
-            // iconStream = new MemoryStream(Encoding.UTF8.GetBytes(s: dataUri));
-            // BitConverter.GetBytes(9894494448401390090).CopyTo(imgData, 0);
+            const long maxImageSize = 256_000;
+            if (iconStream.Length > maxImageSize)
+            {
+                Program.log.LogDebug("Image too large {length} > {max}{conv}", iconStream.Length, maxImageSize, imageFormat is not JpegFormat && imageFormat is not PngFormat && imageFormat is not GifFormat ? " after conversion, convert to a jpg or png before submitting" : "");
+                return Result<(MemoryStream?, IImageFormat?)>.FromError(new ArgumentInvalidError("Image Url", $"{imageUrl} is larger than 256KB, please resize it"));
+            }
 
             return Result<(MemoryStream? iconStream, IImageFormat? imageFormat)>.FromSuccess((iconStream, imageFormat));
         }
@@ -790,7 +801,7 @@ namespace DiscordBoostRoleBot
                     reason: $"Member requested to modify role").ConfigureAwait(false);
                 roleData.ImageHash = null;
             }
-            else if (IsUnicodeOrEmoji(new_image))
+            else if (IsUnicodeEmoji(new_image))
             {
                 modifyRoleResult = await _restGuildApi.ModifyGuildRoleAsync(_context.GuildID.Value, role.ID,
                     new_name ?? default(Optional<string?>),
@@ -833,7 +844,7 @@ namespace DiscordBoostRoleBot
                 }
 
                 MemoryStream? newIconStream = null;
-                Result<(MemoryStream? iconStream, IImageFormat? imageFormat)> imageToStreamResult = await ImageUrlToBase64(imageUrl: new_image).ConfigureAwait(false);
+                Result<(MemoryStream?, IImageFormat?)> imageToStreamResult = await ImageUrlToBase64(imageUrl: new_image).ConfigureAwait(false);
                 if (!imageToStreamResult.IsSuccess)
                 {
                     errResponse = await _feedbackService.SendContextualErrorAsync(imageToStreamResult.Error.Message);
@@ -909,9 +920,9 @@ namespace DiscordBoostRoleBot
             return deleteResponse;
         }
 
-        public static bool IsUnicodeOrEmoji(string newImage)
+        public static bool IsUnicodeEmoji(string newImage)
         {
-            return (newImage.Length == 1 || (newImage.StartsWith(':') && newImage.EndsWith(':')));
+            return newImage.Length == 1;
         }
 
         private async Task<IResult> SendSuccessReply(string successMessage)

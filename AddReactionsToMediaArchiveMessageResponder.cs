@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -32,6 +33,7 @@ using SixLabors.ImageSharp;
 using Z.EntityFramework.Plus;
 using Color = System.Drawing.Color;
 
+[assembly: InternalsVisibleTo("DiscordBotTests")]
 namespace DiscordBoostRoleBot
 {
     internal class AddReactionsToMediaArchiveMessageResponder : IResponder<IMessageCreate>
@@ -73,13 +75,18 @@ namespace DiscordBoostRoleBot
 
             foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
-                string emotePrepped = PrepEmoteForReaction(emote);
-                if(!CheckEmoteForReaction(emotePrepped))
+                Match match = ReactWithoutRequiredIdRegex.Match(emote);
+                if(!match.Success && emote.Length != 1)
                 {
-                    _logger.LogWarning("{emote} does not look like right format", emotePrepped);
+                    _logger.LogWarning("{emote} does not look like right format", match.Groups["emoteWithId"].Value);
                 }
 
-                Result addReactionsResult = await _channelApi.CreateReactionAsync(channelId, messageId, emotePrepped, ct: ct).ConfigureAwait(false);
+                if (!match.Groups["id"].Success)
+                {
+                    _logger.LogWarning("{emote} has no id, this should fail", match.Groups["emoteWithId"].Value);
+                }
+
+                Result addReactionsResult = await _channelApi.CreateReactionAsync(channelId, messageId, match.Groups["emoteWithId"].Value, ct: ct).ConfigureAwait(false);
                 if (!addReactionsResult.IsSuccess)
                 {
                     _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", messageId, emote, addReactionsResult.Error);
@@ -94,11 +101,12 @@ namespace DiscordBoostRoleBot
             return emote.Trim('<', '>', ':');
         }
 
-        private static readonly Regex ReactRegex = new("^[a-zA-Z0-9]+:[0-9]+");
+        public static readonly Regex ReactWithRequiredIdRegex = new("^<:(?<animated>a:)?(?<name>[a-zA-Z0-9]+):(?<id>[0-9]+)>$");
+        public static readonly Regex ReactWithoutRequiredIdRegex = new("^<:(?<emoteWithId>(?<animated>a:)?(?<name>[a-zA-Z0-9]+)(:(?<id>[0-9]+))?)>$");
 
         public static bool CheckEmoteForReaction(string emote)
         {
-            return ReactRegex.IsMatch(emote);
+            return ReactWithRequiredIdRegex.IsMatch(emote);
         }
     }
 
@@ -131,7 +139,7 @@ namespace DiscordBoostRoleBot
             [Description("The User who's messages will be reacted to")]
             IGuildMember? user = null,
             [Description("Emotes to react with, separated with ;")]
-            string? emotes = null)
+            string? emotesString = null)
         {
             IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
@@ -180,16 +188,31 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(result: errResponse);
             }
 
-            if (emotes is not null)
+            if (emotesString is not null)
             {
-                responseMessage = emotes.Split(';')
-                    .Where(emote =>
-                        !AddReactionsToMediaArchiveMessageResponder.CheckEmoteForReaction(
-                            AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote.Trim())))
-                    .Aggregate("",
-                        (current, emote) =>
-                            current +
-                            $"Emote {emote} does not appear to be in the correct format, run a test before relying on this to react automatically\n");
+                responseMessage = "";
+                IEnumerable<string> emotes = emotesString.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(emote => emote.Length != 0);
+                foreach (string emote in emotes)
+                {
+                    Match match = AddReactionsToMediaArchiveMessageResponder.ReactWithoutRequiredIdRegex.Match(emote);
+                    switch (emote.Length)
+                    {
+                        case 1:
+                            continue;
+                        case > 1 when !match.Success:
+                            responseMessage +=
+                                $"Emote {emote} does not appear to be in the correct format, run a test before relying on this to react automatically\n";
+                            break;
+                        case > 1 when !match.Groups["id"].Success:
+                        {
+                                responseMessage += $"Emote {emote} has no id specified, to ensure bot works correctly, choose the emoji from the panel\n";
+                                break;
+                        }
+                        case > 1 when match.Groups["animated"].Success:
+                            responseMessage += $"Animated emotes may not work correctly";
+                            break;
+                    }
+                }
             }
 
             await using Database.DiscordDbContext database = new();
@@ -199,7 +222,7 @@ namespace DiscordBoostRoleBot
             //TODO: Test emotes can be reacted before doing it
             if (serverSettings == null)
             {
-                if (channel is null || user is null || string.IsNullOrWhiteSpace(emotes))
+                if (channel is null || user is null || string.IsNullOrWhiteSpace(emotesString))
                 {
                     responseMessage += "Must specify all 3 of channel, user, and emotes";
                     Result<IReadOnlyList<IMessage>> respondResult =
@@ -225,7 +248,7 @@ namespace DiscordBoostRoleBot
                 serverSettings = new Database.MessageReactorSettings
                 {
                     ServerId = _context.GuildID.Value.Value,
-                    Emotes = emotes,
+                    Emotes = emotesString,
                     UserIds = user.User.Value.ID.Value,
                     ChannelId = channel.ID.Value
                 };
@@ -234,10 +257,10 @@ namespace DiscordBoostRoleBot
             }
             else
             {
-                if (emotes is not null)
+                if (emotesString is not null)
                 {
-                    serverSettings.Emotes = emotes;
-                    responseMessage += $"Added Emotes {emotes}\n";
+                    serverSettings.Emotes = emotesString;
+                    responseMessage += $"Added Emotes {emotesString}\n";
                 }
 
                 if (channel is not null)

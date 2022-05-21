@@ -377,7 +377,7 @@ namespace DiscordBoostRoleBot
                 string? imageEmoji = null;
                 if (roleData.ImageUrl is not null)
                 {
-                    if (RoleCommands.IsUnicodeOrEmoji(roleData.ImageUrl))
+                    if (RoleCommands.IsUnicodeEmoji(roleData.ImageUrl))
                     {
                         if (!ownerRole.UnicodeEmoji.HasValue || ownerRole.UnicodeEmoji.Value != roleData.ImageUrl)
                         {
