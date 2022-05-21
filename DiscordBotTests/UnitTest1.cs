@@ -10,7 +10,7 @@ namespace DiscordBotTests
         public void TestEmoteRegex(string emoteString, bool isEmote, string emoteWithId, string emoteName, string emoteId, bool isAnimated)
         {
             var match =
-                DiscordBoostRoleBot.AddReactionsToMediaArchiveMessageResponder.ReactWithoutRequiredIdRegex.Match(
+                DiscordBoostRoleBot.AddReactionsToMediaArchiveMessageResponder.EmoteWithoutRequiredIdRegex.Match(
                     emoteString);
             Assert.Equal(match.Success, isEmote);
             Assert.Equal(match.Groups["emoteWithId"].Value, emoteWithId);

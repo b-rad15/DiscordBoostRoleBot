@@ -75,7 +75,7 @@ namespace DiscordBoostRoleBot
 
             foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
-                Match match = ReactWithoutRequiredIdRegex.Match(emote);
+                Match match = EmoteWithoutRequiredIdRegex.Match(emote);
                 if(!match.Success && emote.Length != 1)
                 {
                     _logger.LogWarning("{emote} does not look like right format", match.Groups["emoteWithId"].Value);
@@ -101,12 +101,12 @@ namespace DiscordBoostRoleBot
             return emote.Trim('<', '>', ':');
         }
 
-        public static readonly Regex ReactWithRequiredIdRegex = new("^<:(?<animated>a:)?(?<name>[a-zA-Z0-9]+):(?<id>[0-9]+)>$");
-        public static readonly Regex ReactWithoutRequiredIdRegex = new("^<:(?<emoteWithId>(?<animated>a:)?(?<name>[a-zA-Z0-9]+)(:(?<id>[0-9]+))?)>$");
+        public static readonly Regex EmoteWithRequiredIdRegex = new("^<:(?<animated>a:)?(?<name>[a-zA-Z0-9]+):(?<id>[0-9]+)>$");
+        public static readonly Regex EmoteWithoutRequiredIdRegex = new("^<:(?<emoteWithId>(?<animated>a:)?(?<name>[a-zA-Z0-9]+)(:(?<id>[0-9]+))?)>$");
 
         public static bool CheckEmoteForReaction(string emote)
         {
-            return ReactWithRequiredIdRegex.IsMatch(emote);
+            return EmoteWithRequiredIdRegex.IsMatch(emote);
         }
     }
 
@@ -194,7 +194,7 @@ namespace DiscordBoostRoleBot
                 IEnumerable<string> emotes = emotesString.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(emote => emote.Length != 0);
                 foreach (string emote in emotes)
                 {
-                    Match match = AddReactionsToMediaArchiveMessageResponder.ReactWithoutRequiredIdRegex.Match(emote);
+                    Match match = AddReactionsToMediaArchiveMessageResponder.EmoteWithoutRequiredIdRegex.Match(emote);
                     switch (emote.Length)
                     {
                         case 1:

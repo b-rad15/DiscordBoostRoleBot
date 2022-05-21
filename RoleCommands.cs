@@ -62,7 +62,18 @@ namespace DiscordBoostRoleBot
 
         public static readonly Regex Base64Regex = new(@"^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$");
 
-        [RequireContext(ChannelContext.Guild)]
+
+        public string? EmoteToDiscordUrl(string emote)
+        {
+            var regexMatch = AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.Match(emote);
+            if (!regexMatch.Success)
+            {
+                return null;
+            }
+            return $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.jpg";
+        }
+
+        //[RequireContext(ChannelContext.Guild)]
         // [RequireDiscordPermission(DiscordPermission.ManageRoles | DiscordPermission.Administrator)]
         [Command("make-role")]
         [CommandType(type: ApplicationCommandType.ChatInput)]
@@ -206,6 +217,16 @@ namespace DiscordBoostRoleBot
             IImageFormat? iconFormat = null;
             if (image_url is not null)
             {
+                if (AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.IsMatch(image_url))
+                {
+                    image_url = EmoteToDiscordUrl(image_url);
+                } else if(AddReactionsToMediaArchiveMessageResponder.EmoteWithoutRequiredIdRegex.IsMatch(image_url))
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Please Choose Emoji from selction menu, simply typing the emoji make getting the image impossible");
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(errResponse);
+                }
                 Result<(MemoryStream?, IImageFormat?)> imageToStreamResult = await ImageUrlToBase64(imageUrl: image_url).ConfigureAwait(false);
                 if (!imageToStreamResult.IsSuccess)
                 {
@@ -841,6 +862,16 @@ namespace DiscordBoostRoleBot
                     await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
                     deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
+                }
+                if (AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.IsMatch(new_image))
+                {
+                    new_image = EmoteToDiscordUrl(new_image);
+                } else if (AddReactionsToMediaArchiveMessageResponder.EmoteWithoutRequiredIdRegex.IsMatch(new_image))
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Please Choose Emoji from selction menu, simply typing the emoji make getting the image impossible");
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(errResponse);
                 }
 
                 MemoryStream? newIconStream = null;
