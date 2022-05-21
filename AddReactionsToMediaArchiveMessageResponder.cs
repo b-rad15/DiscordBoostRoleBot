@@ -101,8 +101,8 @@ namespace DiscordBoostRoleBot
             return emote.Trim('<', '>', ':');
         }
 
-        public static readonly Regex EmoteWithRequiredIdRegex = new("^<:(?<animated>a:)?(?<name>[a-zA-Z0-9]+):(?<id>[0-9]+)>$");
-        public static readonly Regex EmoteWithoutRequiredIdRegex = new("^<:(?<emoteWithId>(?<animated>a:)?(?<name>[a-zA-Z0-9]+)(:(?<id>[0-9]+))?)>$");
+        public static readonly Regex EmoteWithRequiredIdRegex = new("^<(?<animated>a)?:(?<name>[a-zA-Z0-9]+):(?<id>[0-9]+)>$");
+        public static readonly Regex EmoteWithoutRequiredIdRegex = new("^<(?<emoteWithId>(?<animated>a)?:(?<name>[a-zA-Z0-9]+)(:(?<id>[0-9]+))?)>$");
 
         public static bool CheckEmoteForReaction(string emote)
         {

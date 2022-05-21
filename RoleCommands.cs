@@ -70,7 +70,7 @@ namespace DiscordBoostRoleBot
             {
                 return null;
             }
-            return $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.jpg";
+            return $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.{(regexMatch.Groups["animated"].Success ? "gif" : "jpg")}";
         }
 
         //[RequireContext(ChannelContext.Guild)]
