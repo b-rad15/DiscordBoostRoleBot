@@ -86,9 +86,9 @@ namespace DiscordBoostRoleBot
                     _log.LogWarning("I don't know how you invoked this command");
                     return Result<IGuildMember>.FromError(new InvalidOperationError("I don't know how you invoked this command"));
             }
-            if (!executorGuildMember.HasPermAdminOrOwner(permissions))
+            if (!executorGuildMember.HasAllPermsAdminOrOwner(permissions))
             {
-                return Result<IGuildMember>.FromError(new PermissionDeniedError($"You do not have the required permission{(permissions.Length != 1 ? (permissions.Length != 0 ? "s:" : "s") : "")} {string.Join(", ", permissions)}"));
+                return Result<IGuildMember>.FromError(new PermissionDeniedError($"You do not have the required permission{(permissions.Length != 1 ? (permissions.Length != 0 ? "s:" : "s") : ":")} {string.Join(", ", permissions)}"));
             }
             return Result<IGuildMember>.FromSuccess(executorGuildMember);
         }
@@ -204,7 +204,7 @@ Note: All users with server role change permissions and boosters are allowed to 
         [CommandType(type: ApplicationCommandType.ChatInput)]
         [Description("Make a new role, attach an image to add it to the role")]
         public async Task<IResult> MakeNewRole([Description("Role Name")] string role_name,
-            [Description("Color in #XxXxXx format or common name, leave blank or #000000 to keep current color")] string color,
+            [Description("Color in #XxXxXx format or common name, use black or #000000 to keep current color")] string color = "#000000",
             [Description("The User to assign the role to")] IGuildMember? assign_to_member = null,
             [Description("The image url to use for the icon")] string? image_url = null
             )
@@ -272,6 +272,20 @@ Note: All users with server role change permissions and boosters are allowed to 
                     await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
                     deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
+            }
+            if (!executorGuildMember.Permissions.HasValue)
+            {
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, _context.GuildID.Value);
+                if (!getPermsResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    {
+                        MessageFlags = MessageFlags.Ephemeral
+                    }).ConfigureAwait(false);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
             }
 
             assign_to_member ??= executorGuildMember;
@@ -625,6 +639,20 @@ Note: All users with server role change permissions and boosters are allowed to 
                         ? Result.FromSuccess()
                         : Result.FromError(result: errResponse);
             }
+            if (!member.Permissions.HasValue)
+            {
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(member, _context.GuildID.Value);
+                if (!getPermsResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    {
+                        MessageFlags = MessageFlags.Ephemeral
+                    }).ConfigureAwait(false);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+            }
 
             if (!delete_role && !member.IsRoleModAdminOrOwner())
             {
@@ -655,12 +683,14 @@ Note: All users with server role change permissions and boosters are allowed to 
                 return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
             (int result, ulong ownerId) = await Database.RemoveRoleFromDatabase(role).ConfigureAwait(false);
+            string replyMessageText = "";
             switch (result)
             {
                 case -1:
                 {
+                    replyMessageText += $"Role {role.Mention()} not found in database, make sure it was created using the bot or added using /track-role";
                     replyResult = await _feedbackService.SendContextualErrorAsync(
-                        $"Role {role.Mention()} not found in database, make sure it was created using the bot or added using /track-role",
+                        replyMessageText,
                         ct: this.CancellationToken).ConfigureAwait(false);
                     return !replyResult.IsSuccess
                         ? Result.FromError(replyResult)
@@ -668,7 +698,8 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
                 case 0:
                 {
-                    _log.LogWarning($"Role {role.Mention()} could not be removed from database");
+                    replyMessageText += $"Role {role.Mention()} could not be removed from database";
+                    _log.LogWarning(replyMessageText);
                     replyResult = await _feedbackService.SendContextualErrorAsync(
                         $"Role {role.Mention()} could not be removed from database, try again later",
                         ct: this.CancellationToken).ConfigureAwait(false);
@@ -678,8 +709,9 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
                 case 1:
                 {
+                    replyMessageText += $"Role {role.Mention()} untracked successfully";
                     replyResult = await _feedbackService.SendContextualSuccessAsync(
-                        $"Role {role.Mention()} untracked successfully",
+                        replyMessageText,
                         ct: this.CancellationToken).ConfigureAwait(false);
                     if (!replyResult.IsSuccess)
                         return Result.FromError(replyResult);
@@ -698,10 +730,11 @@ Note: All users with server role change permissions and boosters are allowed to 
                             role.Mention(), deleteResult.Error);
                         return await SendErrorReply($"Could not remove role {role.Mention()}, remove it manually").ConfigureAwait(false);
                     }
-
+                    //TODO: Add editing reply message
+                    replyMessageText = $"Deleted role {role.Name} : {role.Mention()} from server";
+                    // await _restChannelApi.DeleteMessageAsync(_context.ChannelID, replyResult.Entity.First().ID);
                     replyResult =
-                        await _feedbackService.SendContextualSuccessAsync(
-                            $"Deleted role {role.Name} : {role.Mention()} from server").ConfigureAwait(false);
+                        await _feedbackService.SendContextualSuccessAsync(replyMessageText).ConfigureAwait(false);
                     return replyResult.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(replyResult);
@@ -754,6 +787,20 @@ Note: All users with server role change permissions and boosters are allowed to 
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(result: errResponse);
+            }
+            if (!executorGuildMember.Permissions.HasValue)
+            {
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, _context.GuildID.Value);
+                if (!getPermsResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    {
+                        MessageFlags = MessageFlags.Ephemeral
+                    }).ConfigureAwait(false);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
             }
 
             //If you are not a mod/owner then deny you
@@ -890,6 +937,20 @@ Note: All users with server role change permissions and boosters are allowed to 
                     deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                     return deleteResponse;
             }
+            if (!member.Permissions.HasValue)
+            {
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(member, _context.GuildID.Value);
+                if (!getPermsResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    {
+                        MessageFlags = MessageFlags.Ephemeral
+                    }).ConfigureAwait(false);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+            }
             await using Database.DiscordDbContext database = new();
             Database.RoleData? roleData = await database.RolesCreated
                 .Where(rd => _context.GuildID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync().ConfigureAwait(false);
@@ -907,12 +968,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
-
-            // if (roleData.RoleUserId.IsOwner() && !_context.User.IsOwner())
-            // {
-            //     _log.LogCritical("{executeUser} tried to modify role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleData.RoleUserId).User(), _context.GuildID.Value.Value);
-            //     return await SendErrorReply("You really gonna do that?");
-            // }
+            
             // If they don't have ManageRoles perm and if they either did not create the role or do not have the role, deny access
             if (roleData.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
@@ -1084,7 +1140,6 @@ Note: All users with server role change permissions and boosters are allowed to 
                 deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
                 return deleteResponse;
             }
-
             replyResult = await _feedbackService.SendContextualSuccessAsync(
                 $"Successfully modified role {modifyRoleResult.Entity.Mention()}").ConfigureAwait(false);
             if (!_context.User.IsOwner() || !replyResult.IsSuccess)

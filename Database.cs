@@ -110,7 +110,7 @@ namespace DiscordBoostRoleBot
                         (RelationalEventId.ConnectionOpened, LogLevel.Trace),
                         (RelationalEventId.CommandCreating, LogLevel.Trace),
                         (CoreEventId.ContextInitialized, LogLevel.Trace),
-                        (RelationalEventId.CommandExecuted, LogLevel.Trace),
+                        (RelationalEventId.CommandExecuted, LogLevel.Debug),
                         (RelationalEventId.ConnectionClosed, LogLevel.Trace)))
                     .EnableSensitiveDataLogging()
                     .EnableDetailedErrors();
@@ -153,7 +153,8 @@ namespace DiscordBoostRoleBot
         public static async Task<int> GetRoleCount(ulong serverId, ulong userId)
         {
             await using DiscordDbContext database = new();
-            return await database.RolesCreated.CountAsync(rd => rd.RoleUserId == userId).ConfigureAwait(false);
+            var rolesCount = await database.RolesCreated.CountAsync(rd => rd.ServerId == serverId && rd.RoleUserId == userId).ConfigureAwait(false);
+            return rolesCount;
         }
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(IRole role) => await RemoveRoleFromDatabase(role.ID).ConfigureAwait(false);
         public static async Task<(int, ulong)> RemoveRoleFromDatabase(Snowflake roleSnowflake) => await RemoveRoleFromDatabase(roleSnowflake.Value).ConfigureAwait(false);

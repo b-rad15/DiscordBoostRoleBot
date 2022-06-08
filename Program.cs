@@ -78,8 +78,10 @@ namespace DiscordBoostRoleBot
                         .AddConsole()
                         .AddFilter("System.Net.Http.HttpClient.*.LogicalHandler", level: LogLevel.Warning)
                         .AddFilter("System.Net.Http.HttpClient.*.ClientHandler", level: LogLevel.Warning)
+                        .AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", level: LogLevel.Trace)
 #if DEBUG
                         .AddDebug()
+                        .SetMinimumLevel(LogLevel.Debug)
 #endif
                 )
                 .UseConsoleLifetime()
@@ -205,24 +207,61 @@ namespace DiscordBoostRoleBot
                         switch (restError.Error.Code)
                         {
                             case DiscordError.InvalidGuild:
-                                log.LogDebug("Guild {guild} is invalid", guildId);
+                                log.LogWarning("Guild {guild} is invalid", guildId);
                                 break;
                             case DiscordError.UnknownGuild:
-                                log.LogDebug("Guild {guild} is unknown", guildId);
+                                log.LogWarning("Guild {guild} is unknown", guildId);
                                 break;
                             case DiscordError.UnknownMember:
-                                log.LogDebug("Member {member} in guild {guild} is invalid", memberIdSnowflake,  guildId);
+                                //TODO: Remove these from database
+                                log.LogWarning("Member {member} in guild {guild} is invalid", memberIdSnowflake,  guildId);
                                 break;
                             default:
-                                log.LogError("Rest error getting member {memberId} because reason {reason}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title));
+                                log.LogWarning("Rest error getting member {memberId} because reason {reason}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title));
                                 break;
                         }
                     } else
                     {
-                        log.LogError("Failed to get guild member {memberId} because {error}", memberIdSnowflake.Value, guildMemberResult.Error.Message);
+                        log.LogWarning("Failed to get guild member {memberId} because {error}", memberIdSnowflake.Value, guildMemberResult.Error.Message);
                     }
+                    continue;
                 }
-                membersList.Add(guildMemberResult.Entity);
+
+                var guildMember = guildMemberResult.Entity;
+                if (!guildMember.Permissions.HasValue)
+                {
+                    Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(guildMember, guildId);
+                    if (!getPermsResult.IsSuccess)
+                    {
+                        if (getPermsResult.Error is RestResultError<RestError> restError)
+                        {
+                            // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+                            switch (restError.Error.Code)
+                            {
+                                case DiscordError.InvalidGuild:
+                                    log.LogWarning("Guild {guild} is invalid", guildId);
+                                    break;
+                                case DiscordError.UnknownGuild:
+                                    log.LogWarning("Guild {guild} is unknown", guildId);
+                                    break;
+                                case DiscordError.UnknownMember:
+                                    //TODO: Remove these from database
+                                    log.LogWarning("Member {member} in guild {guild} is invalid", memberIdSnowflake, guildId);
+                                    break;
+                                default:
+                                    log.LogWarning("Rest error getting member {memberId}'s permissions in {guild} because reason {reason}", memberIdSnowflake.Value, guildId, restError.Error.Code.Humanize(LetterCasing.Title));
+                                    break;
+                            }
+                        } else
+                        {
+                            log.LogWarning("Failed to get guild member {memberId} permissions in {guild} because {error}", memberIdSnowflake.Value, guildId, getPermsResult.Error.Message);
+                        }
+                        continue;
+                    }
+
+                    guildMember = getPermsResult.Entity;
+                }
+                membersList.Add(guildMember);
             }
             return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
         }
@@ -230,6 +269,7 @@ namespace DiscordBoostRoleBot
         internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake serverId, CancellationToken ct = new())
         {
             List<Snowflake> peopleRemoved = new();
+#if false
             Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(serverId, checkIsBoosting: true).ConfigureAwait(false);
             if (!guildBoostersResult.IsSuccess)
             {
@@ -238,6 +278,7 @@ namespace DiscordBoostRoleBot
             }
 
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
+#endif
             await using Database.DiscordDbContext database = new();
             List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
             List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
@@ -309,6 +350,19 @@ namespace DiscordBoostRoleBot
                 log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
             }
             return Result<List<Snowflake>>.FromSuccess(peopleRemoved);
+        }
+
+        internal static async Task<Result<IGuildMember>> AddGuildMemberPermissions(IGuildMember guildMember,
+            Snowflake guildId, CancellationToken ct = default)
+        {
+            Result<IReadOnlyList<IRole>> guildRoles = await _restGuildApi.GetGuildRolesAsync(guildId, ct: ct);
+            if(!guildRoles.IsSuccess) 
+                return Result<IGuildMember>.FromError(guildRoles.Error);
+            IDiscordPermissionSet discordPermissionSet = DiscordPermissionSet.ComputePermissions(guildMember.User.Value.ID,
+                guildRoles.Entity.FirstOrDefault(role => role.ID == guildId)
+                ?? guildRoles.Entity.First(), guildRoles.Entity);
+            guildMember = ((guildMember as GuildMember)!) with { Permissions = new(discordPermissionSet) };
+            return Result<IGuildMember>.FromSuccess(guildMember);
         }
 
         internal static async Task<Result<bool>> CheckBotOwnerRole(Snowflake serverId, IGuildMember botOwnerGm,

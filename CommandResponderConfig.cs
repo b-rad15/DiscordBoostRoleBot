@@ -76,6 +76,21 @@ namespace DiscordBoostRoleBot
                         ? Result.FromSuccess()
                         : Result.FromError(result: errResponse);
             }
+
+            if (!executorGuildMember.Permissions.HasValue)
+            {
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, _context.GuildID.Value);
+                if (!getPermsResult.IsSuccess)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    {
+                        MessageFlags = MessageFlags.Ephemeral
+                    }).ConfigureAwait(false);
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+            }
             if (!executorGuildMember.IsChannelModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have mod permissions", options: new FeedbackMessageOptions

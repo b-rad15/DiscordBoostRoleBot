@@ -22,6 +22,7 @@
 
 using System.Drawing;
 using Remora.Discord.API.Abstractions.Objects;
+using Remora.Discord.API.Objects;
 using Remora.Rest.Core;
 
 namespace DiscordBoostRoleBot {
@@ -131,27 +132,40 @@ namespace DiscordBoostRoleBot {
         public static bool IsRoleModAdminOrOwner(this IGuildMember member)
         {
             //Permissions are include in object
-            return member.Permissions.HasValue
-                   //and those permissions include manage roles or admin (since having admin != manage roles)
-                     && (member.Permissions.Value.HasPermission(DiscordPermission.ManageRoles) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
+            if (!member.Permissions.HasValue)
+                throw new NullReferenceException("Member does not have permissions stored");
+            //and those permissions include manage roles or admin (since having admin != manage roles)
+            return (member.Permissions.Value.HasPermission(DiscordPermission.ManageRoles) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
                    //or it's a me
-                     || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
         }
         public static bool IsChannelModAdminOrOwner(this IGuildMember member)
         {
             //Permissions are include in object
-            return member.Permissions.HasValue
-                   //and those permissions include manage roles or admin (since having admin != manage roles)
-                     && (member.Permissions.Value.HasPermission(DiscordPermission.ManageChannels) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
+            if (!member.Permissions.HasValue)
+                throw new NullReferenceException("Member does not have permissions stored");
+            //and those permissions include manage roles or admin (since having admin != manage roles)
+            return (member.Permissions.Value.HasPermission(DiscordPermission.ManageChannels) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
                    //or it's a me
                      || member.User.Value.ID.Value == Program.Config.BotOwnerId;
         }
-        public static bool HasPermAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
+        public static bool HasAllPermsAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
         {
             //Permissions are include in object
-            return member.Permissions.HasValue
-                   //and those permissions include manage roles or admin (since having admin != manage roles)
-                   && (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.All(perm=>member.Permissions.Value.HasPermission(perm)))
+            if (!member.Permissions.HasValue)
+                throw new NullReferenceException("Member does not have permissions stored");
+            //and those permissions include manage roles or admin (since having admin != manage roles)
+            return (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.All(perm=> member.Permissions.Value.HasPermission(perm)))
+                   //or it's a me
+                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+        }
+        public static bool HasAnyPermsAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
+        {
+            //Permissions are include in object
+            if (!member.Permissions.HasValue)
+                throw new NullReferenceException("Member does not have permissions stored");
+            //and those permissions include manage roles or admin (since having admin != manage roles)
+            return (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.Any(perm=> member.Permissions.Value.HasPermission(perm)))
                    //or it's a me
                    || member.User.Value.ID.Value == Program.Config.BotOwnerId;
         }
