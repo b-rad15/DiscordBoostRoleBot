@@ -242,7 +242,7 @@ namespace DiscordBoostRoleBot
             List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
             List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
             Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId,
-                rolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleId)));
+                rolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleUserId)));
             foreach (IGuildMember member in members.Entity)
             {
                 if (member.IsBoosting() || member.IsRoleModAdminOrOwner())

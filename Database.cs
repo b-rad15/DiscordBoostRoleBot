@@ -121,9 +121,8 @@ namespace DiscordBoostRoleBot
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(MessageReactorSettingsEntityTypeConfiguration).Assembly);
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(ServerSettingsEntityTypeConfiguration).Assembly);
                 const char separatorChar = '|';
-                var snowflakeListConverter = new ValueConverter<List<Snowflake>, string>(snowflakesList =>
-                        string.Join(separatorChar, snowflakesList),
-                    snowflakesString => snowflakesString.Split(separatorChar, StringSplitOptions.None)
+                var snowflakeListConverter = new ValueConverter<List<Snowflake>, string>(snowflakesList => string.Join(separatorChar, snowflakesList),
+                    snowflakesString => snowflakesString.Split(separatorChar, StringSplitOptions.RemoveEmptyEntries)
                         .Select(individualSnowflakeString => new Snowflake(Convert.ToUInt64(individualSnowflakeString), 0)).ToList());
                 var snowflakeListValueComparer = new ValueComparer<List<Snowflake>>(
                     (c1, c2) => new HashSet<Snowflake>(c1!).SetEquals(new HashSet<Snowflake>(c2!)),
