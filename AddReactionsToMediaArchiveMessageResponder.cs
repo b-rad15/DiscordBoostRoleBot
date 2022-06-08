@@ -81,12 +81,12 @@ namespace DiscordBoostRoleBot
                     _logger.LogWarning("{emote} does not look like right format", match.Groups["emoteWithId"].Value);
                 }
 
-                if (!match.Groups["id"].Success)
+                if (!match.Groups["id"].Success && emote.Length != 1)
                 {
                     _logger.LogWarning("{emote} has no id, this should fail", match.Groups["emoteWithId"].Value);
                 }
-
-                Result addReactionsResult = await _channelApi.CreateReactionAsync(channelId, messageId, match.Groups["emoteWithId"].Value, ct: ct).ConfigureAwait(false);
+                string emotePrepped = AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote);
+                Result addReactionsResult = await _channelApi.CreateReactionAsync(channelId, messageId, emotePrepped, ct: ct).ConfigureAwait(false);
                 if (!addReactionsResult.IsSuccess)
                 {
                     _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", messageId, emote, addReactionsResult.Error);
@@ -451,14 +451,36 @@ namespace DiscordBoostRoleBot
         }
 
 
+        public static readonly Regex MessageLinkRegex = new(@"^(http(s)?://)?(www\.)?discord.com/channels/(?<serverId>[0-9]+)/(?<channelId>[0-9]+)/(?<messageId>[0-9]+)$");
+
         [RequireContext(ChannelContext.Guild)]
         [Command("react-to-message")]
         [Description("Send the configured emotess to the given message id")]
         [Ephemeral]
-        public async Task<Result> TestWithMessage([Description("The message Id to test with")] string messageIdNumber, [Description("The channel that message is in")]IChannel channel)
+        public async Task<Result> TestWithMessage([Description("The message Id number or link to test with")] string messageIdString, [Description("The channel that message is in")]IChannel? channel = null, [Description("Emotes to react with, separated with ;")] string? emotesString = null)
         {
-            IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
+            //Verify Message Link/ID inputs
+            var linkMatch = MessageLinkRegex.Match(messageIdString);
+            Snowflake channelId;
+            if (linkMatch.Success)
+            {
+                messageIdString = linkMatch.Groups["messageId"].Value;
+                channelId = new Snowflake(Convert.ToUInt64(linkMatch.Groups["channelId"].Value));
+            } else
+            {
+                if (channel is null)
+                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync(
+                        "If message link is not specified, channel must be specified");
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+                channelId = channel.ID;
+            }
+
+            IGuildMember executorGuildMember;
             switch (_context)
             {
                 case InteractionContext interactionContext:
@@ -502,19 +524,21 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(result: errResponse);
             }
             await using Database.DiscordDbContext database = new();
-            Database.MessageReactorSettings? dbItem = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value)
-                .FirstOrDefaultAsync().ConfigureAwait(false);
-            if (dbItem is null)
+            if (emotesString is null)
             {
-                Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
-                    $"No Configuration exists, use /react-settings to make one").ConfigureAwait(false);
-                return replyResult.IsSuccess
-                    ? Result.FromSuccess()
-                    : Result.FromError(replyResult);
+                emotesString = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value).Select(mrs => mrs.Emotes)
+                    .FirstOrDefaultAsync().ConfigureAwait(false);
+                if (emotesString is null)
+                {
+                    Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
+                        $"No Configuration exists, and no emotes specified, use /react-settings to make one").ConfigureAwait(false);
+                    return replyResult.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(replyResult);
+                }
             }
-            Snowflake channelId = channel.ID;
-            var messageId = new Snowflake(Convert.ToUInt64(messageIdNumber));
-            foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            var messageId = new Snowflake(Convert.ToUInt64(messageIdString));
+            foreach (string emote in emotesString.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 string emotePrepped = AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote);
                 if (!AddReactionsToMediaArchiveMessageResponder.CheckEmoteForReaction(emotePrepped))
@@ -549,7 +573,7 @@ namespace DiscordBoostRoleBot
             //     interactionContext.Token,
             //     new InteractionResponse(InteractionCallbackType.DeferredChannelMessageWithSource) {Data = new InteractionCallbackData{Flags = MessageFlags.Ephemeral | MessageFlags.Loading}});
             
-            IMessageReference? message = interactionContext?.Data.Resolved.Value.Messages.Value.First().Value.MessageReference.Value;
+            IPartialMessage? message = interactionContext?.Data.Resolved.Value.Messages.Value.First().Value;
             Result<IReadOnlyList<IMessage>> errResponse;
             if (message is null)
             {
@@ -561,7 +585,7 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(result: errResponse);
             }
-            if (interactionContext!.Member.Value.IsChannelModAdminOrOwner())
+            if (!interactionContext!.Member.Value.IsChannelModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have mod permissions", options: new FeedbackMessageOptions
                 {
@@ -587,17 +611,18 @@ namespace DiscordBoostRoleBot
             }
 
             var msg = "";
+            Optional<Snowflake> messageId = message.ID;
             foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 string emotePrepped = AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote);
                 if (!AddReactionsToMediaArchiveMessageResponder.CheckEmoteForReaction(emotePrepped))
                     _logger.LogWarning("{emote} does not look like right format", emotePrepped);
-                Result addReactionsResult = await _channelApi.CreateReactionAsync(message.ChannelID.Value, message.MessageID.Value, emotePrepped).ConfigureAwait(false);
+                Result addReactionsResult = await _channelApi.CreateReactionAsync(message.ChannelID.Value, messageId.Value, emotePrepped).ConfigureAwait(false);
                 if (!addReactionsResult.IsSuccess)
                 {
-                    _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", message.MessageID, emote, addReactionsResult.Error);
+                    _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", messageId, emote, addReactionsResult.Error);
                     Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
-                        $"Could not react to message {message.MessageID} with reaction {emote} because {addReactionsResult.Error}", options: new FeedbackMessageOptions
+                        $"Could not react to message {messageId} with reaction {emote} because {addReactionsResult.Error}", options: new FeedbackMessageOptions
                         {
                             MessageFlags = MessageFlags.Ephemeral
                         }).ConfigureAwait(false);
@@ -605,8 +630,8 @@ namespace DiscordBoostRoleBot
                         ? Result.FromSuccess()
                         : Result.FromError(replyResult);
                 }
-                _logger.LogDebug("Reacted with {reaction} to message {message}", emote, message.MessageID);
-                msg += $"Reacted with {emote} to message {message.MessageID}";
+                _logger.LogDebug("Reacted with {reaction} to message {message}", emote, messageId);
+                msg += $"Reacted with {emote} to message {messageId}";
             }
 
             Result<IReadOnlyList<IMessage>> responseResult = await _feedbackService.SendContextualSuccessAsync(msg, options: new FeedbackMessageOptions

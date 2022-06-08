@@ -62,15 +62,93 @@ namespace DiscordBoostRoleBot
 
         public static readonly Regex Base64Regex = new(@"^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$");
 
+        [Command("role-creator-add")]
+        [CommandType(ApplicationCommandType.ChatInput)]
+        [Description("Add a role that is allowed to make their own custom roles")]
+        public async Task<IResult> AddAllowedRoleMaker([Description("The Role to allow to make their own Custom Roles")] IRole roleToAdd)
+        {
+            Result<IReadOnlyList<IMessage>> response;
+            await using Database.DiscordDbContext database = new();
+            Database.ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == _context.GuildID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+            if (serverSettings == null)
+            {
+                serverSettings = new()
+                {
+                    AllowedRolesSnowflakes = new(){roleToAdd.ID},
+                    ServerId = _context.GuildID.Value.Value
+                };
+                database.Add(serverSettings);
+            } else
+            {
+                if (serverSettings.AllowedRolesSnowflakes.Contains(roleToAdd.ID))
+                {
+                    response = await _feedbackService.SendContextualInfoAsync(
+                        $"Role {roleToAdd.Mention()} is already allowed to make custom roles");
+                    return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+                }
+
+                serverSettings.AllowedRolesSnowflakes.Add(roleToAdd.ID);
+            }
+            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
+            response = await _feedbackService.SendContextualInfoAsync(
+                $"Role {roleToAdd.Mention()} is now allowed to make custom roles");
+            return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+        }
+        [Command("role-creator-remove")]
+        [CommandType(ApplicationCommandType.ChatInput)]
+        [Description("Remove a role that is allowed to make their own custom roles")]
+        public async Task<IResult> RemoveAllowedRoleMaker([Description("The Role to remove the ability to make their own Custom Roles")] IRole roleToRemove)
+        {
+            Result<IReadOnlyList<IMessage>> response;
+            var removeWarning = "(Note: mods, role admins, and boosters are still allowed, use slash command permissions to ban users/roles)";
+            await using Database.DiscordDbContext database = new();
+            Database.ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == _context.GuildID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+            if (serverSettings == null || serverSettings.AllowedRolesSnowflakes.Count == 0)
+            {
+                response = await _feedbackService.SendContextualInfoAsync(
+                    $"No specific roles are setup to allow role creation, only mods, admins, and boosters");
+                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+            }
+            if (!serverSettings.AllowedRolesSnowflakes.Contains(roleToRemove.ID))
+            {
+                response = await _feedbackService.SendContextualInfoAsync(
+                    $"Role {roleToRemove.Mention()} was not allowed to make custom roles, no change made {removeWarning}");
+                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+            }
+            serverSettings.AllowedRolesSnowflakes.Remove(roleToRemove.ID);
+            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
+            response = await _feedbackService.SendContextualInfoAsync(
+                $"Role {roleToRemove.Mention()} is now not allowed to make custom roles {removeWarning}");
+            return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+        }
+
+        [Command("role-creator-list")]
+        [CommandType(ApplicationCommandType.ChatInput)]
+        [Description("Lists roles allowed to make their own custom roles")]
+        public async Task<IResult> ListAllowedRolemaker()
+        {
+            Result<IReadOnlyList<IMessage>> response;
+            await using Database.DiscordDbContext database = new();
+            List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == _context.GuildID.Value.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
+            if (allowedRolesSnowflakes == null || allowedRolesSnowflakes.Count == 0)
+            {
+                response = await _feedbackService.SendContextualInfoAsync(
+                    $"No specific roles are setup to allow role creation, only mods, admins, and boosters");
+                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+            }
+
+            string responseString =
+                $@"Current roles allowed to make custom roles:
+{string.Join('\n', allowedRolesSnowflakes.Select(snowflake => snowflake.Role()))}
+Note: All users with server role change permissions and boosters are allowed to make custom roles.";
+            response = await _feedbackService.SendContextualInfoAsync(responseString);
+            return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
+        }
 
         public string? EmoteToDiscordUrl(string emote)
         {
             var regexMatch = AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.Match(emote);
-            if (!regexMatch.Success)
-            {
-                return null;
-            }
-            return $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.{(regexMatch.Groups["animated"].Success ? "gif" : "jpg")}";
+            return regexMatch.Success ? $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.{(regexMatch.Groups["animated"].Success ? "gif" : "png")}" : null;
         }
 
         //[RequireContext(ChannelContext.Guild)]
@@ -152,24 +230,46 @@ namespace DiscordBoostRoleBot
             assign_to_member ??= executorGuildMember;
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
-            if ((_context.User.ID != assign_to_member.User.Value.ID || assign_to_member.IsNotBoosting()) && !executorGuildMember.IsRoleModAdminOrOwner())
+            if (!executorGuildMember.IsRoleModAdminOrOwner())
             {
-                if (await Database.GetRoleCount(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value).ConfigureAwait(false) > 0)
+                //Not a mod, check if assigning to self
+                if (_context.User.ID != assign_to_member.User.Value.ID)
                 {
-                    return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
-                }
-                errResponse = await _feedbackService.SendContextualErrorAsync(
-                    $"You do not have the required permissions to create this role for {assign_to_member.Mention()}, not boosting and don't have ManageRoles mod permissions").ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
-                {
+                    errResponse = await _feedbackService.SendContextualErrorAsync(
+                        $"Non-mods can only assign roles to themselves").ConfigureAwait(false);
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(result: errResponse);
                 }
+                //Not mod and assigning to "assign_to_member", check if boosting
+                if (assign_to_member.IsNotBoosting())
+                {
+                    //Not Boosting, check if has allowed role
+                    await using Database.DiscordDbContext database = new();
+                    List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == _context.GuildID.Value.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
+                    bool hasAllowedRole = false;
+                    if (allowedRolesSnowflakes != null)
+                    {
+                        if (allowedRolesSnowflakes.Any(allowedRoleSnowflake => assign_to_member.Roles.Contains(allowedRoleSnowflake)))
+                        {
+                            hasAllowedRole = true;
+                        }
+                    }
 
-                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
-                deleteResponse = await _restChannelApi.DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
-                return deleteResponse;
+                    if (!hasAllowedRole)
+                    {
+                        errResponse = await _feedbackService.SendContextualErrorAsync(
+                            $"Non-boosters need an approved role to be allowed to use this bot").ConfigureAwait(false);
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(result: errResponse);
+                    }
+                }
+            }
+            //Check if you are not a mod and have more than one role
+            if (!executorGuildMember.IsRoleModAdminOrOwner() && 0 < await Database.GetRoleCount(_context.GuildID.Value.Value, assign_to_member.User.Value.ID.Value).ConfigureAwait(false))
+            {
+                return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
             }
 
             //Declare necessary variables
@@ -222,7 +322,7 @@ namespace DiscordBoostRoleBot
                     image_url = EmoteToDiscordUrl(image_url);
                 } else if(AddReactionsToMediaArchiveMessageResponder.EmoteWithoutRequiredIdRegex.IsMatch(image_url))
                 {
-                    errResponse = await _feedbackService.SendContextualErrorAsync("Please Choose Emoji from selction menu, simply typing the emoji make getting the image impossible");
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Please Choose Emoji from selection menu, simply typing the emoji make getting the image impossible");
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
                         : Result.FromError(errResponse);
@@ -399,8 +499,9 @@ namespace DiscordBoostRoleBot
                     try
                     {
                         Image? imgToConvert = Image.Load(imgData);
-                        if (imgToConvert.Height != imgToConvert.Width)
+                        if (false && imgToConvert.Height != imgToConvert.Width)
                         {
+                            //Seemingly not needed, discord pads non-square icons
                             return Result<(MemoryStream?, IImageFormat?)>.FromError(
                                 new ArgumentInvalidError("Image Url", "Image is not square"));
                         }

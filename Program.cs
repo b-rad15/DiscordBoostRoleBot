@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Remora.Commands.Extensions;
+using Remora.Discord.API.Abstractions.Gateway.Commands;
 using Remora.Discord.Commands.Extensions;
 using Remora.Discord.Commands.Services;
 using Remora.Discord.Hosting.Extensions;
@@ -19,9 +20,11 @@ using Remora.Results;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Discord.API.Abstractions.Results;
+using Remora.Discord.API.Gateway.Events;
 using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Responders;
+using Remora.Discord.Gateway;
 using Remora.Discord.Gateway.Extensions;
 using Remora.Discord.Rest.Extensions;
 using Remora.Extensions.Options.Immutable;
@@ -58,19 +61,17 @@ namespace DiscordBoostRoleBot
                             .AddDiscordCommands(true)
                             .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
                             .AddCommandTree()
-                                .WithCommandGroup<RoleCommands>()
-                                .Finish()
+                            .WithCommandGroup<RoleCommands>()
+                            .Finish()
                             .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
                             .AddCommandTree()
-                                .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
-                                .Finish()
+                            .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
+                            .Finish()
                             .AddCommandTree()
-                                .WithCommandGroup<CommandResponderConfigCommands>()
-                                .Finish()
-                            .AddHostedService<RolesRemoveService>();
-                        // .Finish()
-                        // .AddCommandTree(nameof(EmptyCommands))
-                        //     .WithCommandGroup<EmptyCommands>();
+                            .WithCommandGroup<CommandResponderConfigCommands>()
+                            .Finish()
+                            .AddHostedService<RolesRemoveService>()
+                            .Configure<DiscordGatewayClientOptions>(g => g.Intents |= GatewayIntents.MessageContents);
                     })
                 .ConfigureLogging(
                     c => c
@@ -188,6 +189,43 @@ namespace DiscordBoostRoleBot
             }
             return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
         }
+        internal static async Task<Result<IEnumerable<IGuildMember>>> GetSpecifiedGuildMembers(Snowflake guildId, IEnumerable<Snowflake> membersToGet)
+        {
+            //Check role meets criteria to be added
+            List<IGuildMember> membersList = new();
+            Optional<Snowflake> lastGuildMemberSnowflake = default;
+            foreach (Snowflake memberIdSnowflake in membersToGet)
+            {
+                Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: guildId, userID: memberIdSnowflake).ConfigureAwait(false);
+                if (!guildMemberResult.IsSuccess)
+                {
+                    if (guildMemberResult.Error is RestResultError<RestError> restError)
+                    {
+                        // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+                        switch (restError.Error.Code)
+                        {
+                            case DiscordError.InvalidGuild:
+                                log.LogDebug("Guild {guild} is invalid", guildId);
+                                break;
+                            case DiscordError.UnknownGuild:
+                                log.LogDebug("Guild {guild} is unknown", guildId);
+                                break;
+                            case DiscordError.UnknownMember:
+                                log.LogDebug("Member {member} in guild {guild} is invalid", memberIdSnowflake,  guildId);
+                                break;
+                            default:
+                                log.LogError("Rest error getting member {memberId} because reason {reason}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title));
+                                break;
+                        }
+                    } else
+                    {
+                        log.LogError("Failed to get guild member {memberId} because {error}", memberIdSnowflake.Value, guildMemberResult.Error.Message);
+                    }
+                }
+                membersList.Add(guildMemberResult.Entity);
+            }
+            return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
+        }
 
         internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake serverId, CancellationToken ct = new())
         {
@@ -202,9 +240,40 @@ namespace DiscordBoostRoleBot
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
             await using Database.DiscordDbContext database = new();
             List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
-            foreach (Database.RoleData roleCreated in rolesCreatedForGuild.Where(roleCreated => guildBoosters.All(gb => roleCreated.RoleUserId != gb.User.Value.ID.Value)))
+            List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
+            var members = await GetSpecifiedGuildMembers(serverId,
+                rolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleId)));
+            foreach (IGuildMember member in members.Entity)
             {
-                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(serverId, new Snowflake(roleCreated.RoleId)).ConfigureAwait(false);
+                if (member.IsBoosting() || member.IsRoleModAdminOrOwner())
+                {
+                    continue;
+                }
+
+                //Not a booster or mod
+                var hasAllowedRole = false;
+                if (allowedRolesSnowflakes != null)
+                {
+                    if (allowedRolesSnowflakes.Any(allowedRoleSnowflake => member.Roles.Contains(allowedRoleSnowflake)))
+                    {
+                        hasAllowedRole = true;
+                    }
+                }
+
+                if (hasAllowedRole)
+                {
+                    continue;
+                }
+
+                //Not a booster or mod or allowed role user
+                Database.RoleData? roleCreated = rolesCreatedForGuild.FirstOrDefault(rcfg => rcfg.RoleUserId == member.User.Value.ID.Value);
+                if (roleCreated == null)
+                {
+                    //if no role is found in the database, this is messed up because the member's list was pulled from there, just give up
+                    break;
+                }
+                //Not allowed to have, delete role
+                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(serverId, new(roleCreated.RoleId), ct: ct).ConfigureAwait(false);
                 if (!delRoleResult.IsSuccess)
                 {
                     if (delRoleResult.Error is RestResultError<RestError> restError)
@@ -212,30 +281,18 @@ namespace DiscordBoostRoleBot
                         if (restError.Error.Code == DiscordError.UnknownRole)
                         {
                             log.LogDebug("Role {role} was deleted without using the database, tell {server} not to do that pls", roleCreated.RoleId, serverId);
-                        }
-                        else
+                        } else
                         {
                             log.LogError("Rest error deleting role {role} because reason {reason}", roleCreated.RoleId, restError.Error.Code.Humanize(LetterCasing.Title));
                         }
-                    }
-                    else
+                    } else
                     {
                         log.LogError("Failed to delete role {role} because {error}", roleCreated.RoleId, delRoleResult.Error.Message);
                     }
                 }
                 database.Remove(roleCreated);
-                peopleRemoved.Add(new Snowflake(roleCreated.RoleUserId));
+                peopleRemoved.Add(new(roleCreated.RoleUserId));
             }
-
-            // IGuildMember? botOwnerGm = guildBoosters.FirstOrDefault(gb => gb.IsOwner());
-            // if(botOwnerGm is not null)
-            // {
-            //     Database.RoleData? ownerRole = rolesCreatedForGuild.FirstOrDefault(rc => rc.RoleUserId.IsOwner());
-            //     if (ownerRole is not null)
-            //     {
-            //         await CheckBotOwnerRole(serverId, botOwnerGm, ownerRole, ct);
-            //     }
-            // }
 
             int numRows;
             try

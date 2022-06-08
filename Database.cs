@@ -1,6 +1,9 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.ComponentModel.DataAnnotations.Schema;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
@@ -8,6 +11,7 @@ using Remora.Discord.API.Abstractions.Objects;
 using Remora.Rest.Core;
 using Remora.Results;
 using SQLitePCL;
+using Remora.Discord;
 
 namespace DiscordBoostRoleBot
 {
@@ -73,6 +77,7 @@ namespace DiscordBoostRoleBot
         {
             public ulong ServerId;
             public string Prefix = "&";
+            public List<Snowflake> AllowedRolesSnowflakes { get; set; } = null!;
         }
         public class ServerSettingsEntityTypeConfiguration : IEntityTypeConfiguration<ServerSettings>
         {
@@ -81,6 +86,7 @@ namespace DiscordBoostRoleBot
                 //Property Specific stuff
                 builder.Property(cl => cl.ServerId).IsRequired();
                 builder.Property(cl => cl.Prefix).IsRequired().HasDefaultValue("&");
+                builder.Property(cl => cl.AllowedRolesSnowflakes).IsRequired();
                 //Table Stuff
                 builder.ToTable("ServerSettings");
                 builder.HasKey(cl => cl.ServerId);
@@ -90,7 +96,7 @@ namespace DiscordBoostRoleBot
         {
             public DbSet<RoleData> RolesCreated { get; set; }
             public DbSet<MessageReactorSettings> MessageReactorSettings { get; set; }
-            public DbSet<ServerSettings> ServerSettings { get; set; }
+            public DbSet<ServerSettings> ServerwideSettings { get; set; }
 
             private readonly ILoggerFactory _loggerFactory = Program.LogFactory;
 
@@ -114,6 +120,18 @@ namespace DiscordBoostRoleBot
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(RoleDataEntityTypeConfiguration).Assembly);
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(MessageReactorSettingsEntityTypeConfiguration).Assembly);
                 modelBuilder.ApplyConfigurationsFromAssembly(typeof(ServerSettingsEntityTypeConfiguration).Assembly);
+                const char separatorChar = '|';
+                var snowflakeListConverter = new ValueConverter<List<Snowflake>, string>(snowflakesList =>
+                        string.Join(separatorChar, snowflakesList),
+                    snowflakesString => snowflakesString.Split(separatorChar, StringSplitOptions.None)
+                        .Select(individualSnowflakeString => new Snowflake(Convert.ToUInt64(individualSnowflakeString), 0)).ToList());
+                var snowflakeListValueComparer = new ValueComparer<List<Snowflake>>(
+                    (c1, c2) => new HashSet<Snowflake>(c1!).SetEquals(new HashSet<Snowflake>(c2!)),
+                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                    c => c.ToList());
+                modelBuilder.Entity<ServerSettings>()
+                    .Property(nameof(ServerSettings.AllowedRolesSnowflakes))
+                    .HasConversion(snowflakeListConverter, snowflakeListValueComparer);
             }
 
         }
@@ -156,14 +174,14 @@ namespace DiscordBoostRoleBot
         public static async Task<string> GetPrefix(ulong guildId)
         {
             await using DiscordDbContext database = new();
-            string? prefix = await database.ServerSettings.Where(ss => ss.ServerId == guildId).Select(ss=>ss.Prefix).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
+            string? prefix = await database.ServerwideSettings.Where(ss => ss.ServerId == guildId).Select(ss=>ss.Prefix).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
             return prefix ?? PrefixSetter.DefaultPrefix;
         }
         public static async Task<Result> SetPrefix(Snowflake guildId, string prefix) => await SetPrefix(guildId.Value, prefix).ConfigureAwait(false);
         public static async Task<Result> SetPrefix(ulong guildId, string prefix)
         {
             await using DiscordDbContext database = new();
-            ServerSettings? serverSettings = await database.ServerSettings.Where(ss => ss.ServerId == guildId).FirstOrDefaultAsync().ConfigureAwait(false);
+            ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == guildId).FirstOrDefaultAsync().ConfigureAwait(false);
             if (serverSettings is null)
             {
                 serverSettings = new()
