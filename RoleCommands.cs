@@ -19,6 +19,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Responders;
+using Remora.Discord.Commands.Results;
 using Remora.Rest.Results;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
@@ -62,11 +63,49 @@ namespace DiscordBoostRoleBot
 
         public static readonly Regex Base64Regex = new(@"^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$");
 
+        public async Task<Result<IGuildMember>> ExecutorHasPermissions(params DiscordPermission[] permissions)
+        {
+            IGuildMember executorGuildMember;
+            switch (_context)
+            {
+                case InteractionContext interactionContext:
+                    executorGuildMember = interactionContext.Member.Value;
+                    break;
+                case MessageContext messageContext:
+                    {
+                        Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        if (!guildMemberResult.IsSuccess)
+                        {
+                            _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                            return Result<IGuildMember>.FromError(new InvalidOperationError("Make sure you are in a server"));
+                        }
+                        executorGuildMember = guildMemberResult.Entity;
+                        break;
+                    }
+                default:
+                    _log.LogWarning("I don't know how you invoked this command");
+                    return Result<IGuildMember>.FromError(new InvalidOperationError("I don't know how you invoked this command"));
+            }
+            if (!executorGuildMember.HasPermAdminOrOwner(permissions))
+            {
+                return Result<IGuildMember>.FromError(new PermissionDeniedError($"You do not have the required permission{(permissions.Length != 1 ? (permissions.Length != 0 ? "s:" : "s") : "")} {string.Join(", ", permissions)}"));
+            }
+            return Result<IGuildMember>.FromSuccess(executorGuildMember);
+        }
+
         [Command("role-creator-add")]
         [CommandType(ApplicationCommandType.ChatInput)]
         [Description("Add a role that is allowed to make their own custom roles")]
         public async Task<IResult> AddAllowedRoleMaker([Description("The Role to allow to make their own Custom Roles")] IRole roleToAdd)
         {
+            Result<IGuildMember> permCheckResult = await ExecutorHasPermissions(DiscordPermission.ManageRoles);
+            if (!permCheckResult.IsSuccess)
+            {
+                Result<IReadOnlyList<IMessage>> errResponse = await _feedbackService.SendContextualErrorAsync(permCheckResult.Error.Message);
+                return errResponse.IsSuccess ?
+                    Result.FromSuccess() :
+                    Result.FromError(errResponse);
+            }
             Result<IReadOnlyList<IMessage>> response;
             await using Database.DiscordDbContext database = new();
             Database.ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == _context.GuildID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
@@ -99,6 +138,14 @@ namespace DiscordBoostRoleBot
         [Description("Remove a role that is allowed to make their own custom roles")]
         public async Task<IResult> RemoveAllowedRoleMaker([Description("The Role to remove the ability to make their own Custom Roles")] IRole roleToRemove)
         {
+            Result<IGuildMember> permCheckResult = await ExecutorHasPermissions(DiscordPermission.ManageRoles);
+            if (!permCheckResult.IsSuccess)
+            {
+                Result<IReadOnlyList<IMessage>> errResponse = await _feedbackService.SendContextualErrorAsync(permCheckResult.Error.Message);
+                return errResponse.IsSuccess ?
+                    Result.FromSuccess() :
+                    Result.FromError(errResponse);
+            }
             Result<IReadOnlyList<IMessage>> response;
             var removeWarning = "(Note: mods, role admins, and boosters are still allowed, use slash command permissions to ban users/roles)";
             await using Database.DiscordDbContext database = new();
@@ -147,7 +194,7 @@ Note: All users with server role change permissions and boosters are allowed to 
 
         public string? EmoteToDiscordUrl(string emote)
         {
-            var regexMatch = AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.Match(emote);
+            Match regexMatch = AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.Match(emote);
             return regexMatch.Success ? $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.{(regexMatch.Groups["animated"].Success ? "gif" : "png")}" : null;
         }
 
@@ -586,7 +633,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
             await using Database.DiscordDbContext database = new();
-            var roleCreated = await database.RolesCreated.Where(rc =>
+            Database.RoleData? roleCreated = await database.RolesCreated.Where(rc =>
                 rc.ServerId == _context.GuildID.Value.Value && rc.RoleId == role.ID.Value).FirstOrDefaultAsync();
             if (roleCreated is null)
             {

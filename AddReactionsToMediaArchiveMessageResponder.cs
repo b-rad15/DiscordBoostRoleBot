@@ -461,7 +461,7 @@ namespace DiscordBoostRoleBot
         {
             Result<IReadOnlyList<IMessage>> errResponse;
             //Verify Message Link/ID inputs
-            var linkMatch = MessageLinkRegex.Match(messageIdString);
+            Match linkMatch = MessageLinkRegex.Match(messageIdString);
             Snowflake channelId;
             if (linkMatch.Success)
             {

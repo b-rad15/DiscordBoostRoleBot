@@ -241,7 +241,7 @@ namespace DiscordBoostRoleBot
             await using Database.DiscordDbContext database = new();
             List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
             List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
-            var members = await GetSpecifiedGuildMembers(serverId,
+            Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId,
                 rolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleId)));
             foreach (IGuildMember member in members.Entity)
             {

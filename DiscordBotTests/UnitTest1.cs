@@ -1,5 +1,6 @@
 using Xunit;
 using System;
+using System.Text.RegularExpressions;
 
 namespace DiscordBotTests
 {
@@ -13,7 +14,7 @@ namespace DiscordBotTests
         [InlineData("<::884668053357465651>", false, null, null, null, false)]
         public void TestEmoteRegex(string emoteString, bool isEmote, string emoteWithId, string emoteName, string emoteId, bool isAnimated)
         {
-            var match =
+            Match match =
                 DiscordBoostRoleBot.AddReactionsToMediaArchiveMessageResponder.EmoteWithRequiredIdRegex.Match(
                     emoteString);
             Assert.Equal(isEmote, match.Success);
