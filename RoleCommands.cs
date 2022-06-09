@@ -16,6 +16,7 @@ using Remora.Discord.Commands.Conditions;
 using Remora.Rest.Core;
 using Remora.Results;
 using System.Reflection;
+using System.Windows.Input;
 using Microsoft.EntityFrameworkCore;
 using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Responders;
@@ -35,10 +36,10 @@ namespace DiscordBoostRoleBot
     {
         private readonly FeedbackService _feedbackService;
         private readonly ICommandContext _context;
-        private readonly IDiscordRestGuildAPI _restGuildApi;
+        private static IDiscordRestGuildAPI _restGuildApi;
         private readonly IDiscordRestUserAPI _restUserApi;
-        private readonly IDiscordRestChannelAPI _restChannelApi;
-        private readonly ILogger<RoleCommands> _log;
+        private static IDiscordRestChannelAPI _restChannelApi;
+        private static ILogger<RoleCommands> _log;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RoleCommands"/> class.
@@ -63,7 +64,7 @@ namespace DiscordBoostRoleBot
 
         public static readonly Regex Base64Regex = new(@"^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$");
 
-        public async Task<Result<IGuildMember>> ExecutorHasPermissions(params DiscordPermission[] permissions)
+        public static async Task<Result<IGuildMember>> ExecutorHasPermissions(ICommandContext _context, params DiscordPermission[] permissions)
         {
             IGuildMember executorGuildMember;
             switch (_context)
@@ -72,16 +73,16 @@ namespace DiscordBoostRoleBot
                     executorGuildMember = interactionContext.Member.Value;
                     break;
                 case MessageContext messageContext:
+                {
+                    Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                    if (!guildMemberResult.IsSuccess)
                     {
-                        Result<IGuildMember> guildMemberResult = await _restGuildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
-                        if (!guildMemberResult.IsSuccess)
-                        {
-                            _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
-                            return Result<IGuildMember>.FromError(new InvalidOperationError("Make sure you are in a server"));
-                        }
-                        executorGuildMember = guildMemberResult.Entity;
-                        break;
+                        _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                        return Result<IGuildMember>.FromError(new InvalidOperationError("Make sure you are in a server"));
                     }
+                    executorGuildMember = guildMemberResult.Entity;
+                    break;
+                }
                 default:
                     _log.LogWarning("I don't know how you invoked this command");
                     return Result<IGuildMember>.FromError(new InvalidOperationError("I don't know how you invoked this command"));
@@ -92,6 +93,9 @@ namespace DiscordBoostRoleBot
             }
             return Result<IGuildMember>.FromSuccess(executorGuildMember);
         }
+
+        public async Task<Result<IGuildMember>> ExecutorHasPermissions(params DiscordPermission[] permissions) =>
+            await ExecutorHasPermissions(_context, permissions);
 
         [Command("role-creator-add")]
         [CommandType(ApplicationCommandType.ChatInput)]

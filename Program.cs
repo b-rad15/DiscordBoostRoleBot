@@ -82,6 +82,8 @@ namespace DiscordBoostRoleBot
 #if DEBUG
                         .AddDebug()
                         .SetMinimumLevel(LogLevel.Debug)
+#else
+                        .SetMinimumLevel(LogLevel.Information)
 #endif
                 )
                 .UseConsoleLifetime()
