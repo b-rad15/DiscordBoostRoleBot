@@ -296,13 +296,12 @@ namespace DiscordBoostRoleBot
                 //Check if they are boosting or have ManageRoles permissions
                 try
                 {
-
-                } catch (Exception e)
-                {
                     if (member.IsBoosting() || member.IsRoleModAdminOrOwner())
                     {
                         continue;
                     }
+                } catch (Exception e)
+                {
                     log.LogCritical($"Guild User Object for Snowflake {member.User.Value.ID.Value} has thrown error while checking boost status and permissions: {e}");
                     continue;
                 }
@@ -376,9 +375,10 @@ namespace DiscordBoostRoleBot
             Result<IReadOnlyList<IRole>> guildRoles = await _restGuildApi.GetGuildRolesAsync(guildId, ct: ct);
             if(!guildRoles.IsSuccess) 
                 return Result<IGuildMember>.FromError(guildRoles.Error);
+            IReadOnlyList<IRole> memberRoles = guildRoles.Entity.Where(role => guildMember.Roles.Contains(role.ID)).ToList();
             IDiscordPermissionSet discordPermissionSet = DiscordPermissionSet.ComputePermissions(guildMember.User.Value.ID,
                 guildRoles.Entity.FirstOrDefault(role => role.ID == guildId)
-                ?? guildRoles.Entity.First(), guildRoles.Entity);
+                ?? guildRoles.Entity.First(), memberRoles);
             guildMember = ((guildMember as GuildMember)!) with { Permissions = new(discordPermissionSet) };
             return Result<IGuildMember>.FromSuccess(guildMember);
         }

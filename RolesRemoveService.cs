@@ -20,7 +20,6 @@ namespace DiscordBoostRoleBot
         private readonly TimeSpan _executeInterval = TimeSpan.FromMinutes(Program.Config.RemoveRoleIntervalMinutes.HasValue ? Program.Config.RemoveRoleIntervalMinutes.Value : 5);
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await Task.Delay(30000, stoppingToken).ConfigureAwait(false);
             while (!Program.IsInitialized())
             {
                 await Task.Delay(1000, stoppingToken).ConfigureAwait(false);
