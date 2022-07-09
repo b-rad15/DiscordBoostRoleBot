@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Remora.Discord.API.Abstractions.Objects;
 using Remora.Rest.Core;
 using Remora.Results;
 using Z.EntityFramework.Plus;
@@ -37,7 +38,7 @@ namespace DiscordBoostRoleBot
                 foreach (Snowflake guildId in guildIds)
                 {
                     _logger.LogInformation("{guildId}:", guildId);
-                    Result<List<Snowflake>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId, stoppingToken).ConfigureAwait(false);
+                    Result<List<IGuildMember>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId, stoppingToken).ConfigureAwait(false);
                     if (!removeBoosterResult.IsSuccess)
                     {
                         if (removeBoosterResult.Error.Message.Contains("inner"))
@@ -48,17 +49,17 @@ namespace DiscordBoostRoleBot
                         continue;
                     }
 
-                    List<Snowflake> usersRemoved = removeBoosterResult.Entity;
+                    List<IGuildMember> usersRemoved = removeBoosterResult.Entity;
                     if (usersRemoved.Count == 0)
                     {
                         _logger.LogInformation("\tNone removed");
                         continue;
                     }
-                    foreach (Snowflake userRemoved in usersRemoved)
+                    foreach (IGuildMember userRemoved in usersRemoved)
                     {
                         // Already deleted on removal
                         // await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(stoppingToken);
-                        _logger.LogInformation("\tRemoved user {userMention}", userRemoved.User());
+                        _logger.LogInformation("\tRemoved user {userName} - {userMention}", userRemoved.User.Value.NameAndDiscriminator(), userRemoved.User.Value.Mention());
                     }
                 }
                 await waitTimer;

@@ -268,9 +268,9 @@ namespace DiscordBoostRoleBot
             return Result<IEnumerable<IGuildMember>>.FromSuccess(membersList);
         }
 
-        internal static async Task<Result<List<Snowflake>>> RemoveNonBoosterRoles(Snowflake serverId, CancellationToken ct = new())
+        internal static async Task<Result<List<IGuildMember>>> RemoveNonBoosterRoles(Snowflake serverId, CancellationToken ct = new())
         {
-            List<Snowflake> peopleRemoved = new();
+            List<IGuildMember> peopleRemoved = new();
 #if false
             Result<IEnumerable<IGuildMember>> guildBoostersResult = await GetGuildMembers(serverId, checkIsBoosting: true).ConfigureAwait(false);
             if (!guildBoostersResult.IsSuccess)
@@ -349,7 +349,7 @@ namespace DiscordBoostRoleBot
                     }
                 }
                 database.Remove(roleCreated);
-                peopleRemoved.Add(new(roleCreated.RoleUserId));
+                peopleRemoved.Add(member);
             }
 
             int numRows;
@@ -366,7 +366,7 @@ namespace DiscordBoostRoleBot
             {
                 log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
             }
-            return Result<List<Snowflake>>.FromSuccess(peopleRemoved);
+            return Result<List<IGuildMember>>.FromSuccess(peopleRemoved);
         }
 
         internal static async Task<Result<IGuildMember>> AddGuildMemberPermissions(IGuildMember guildMember,
