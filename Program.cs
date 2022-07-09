@@ -282,22 +282,36 @@ namespace DiscordBoostRoleBot
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
 #endif
             await using Database.DiscordDbContext database = new();
-            List<Database.RoleData> rolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
-            List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
-            Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId,
-                rolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleUserId)));
+            // Get All Custom Roles Users have created for this guild
+            List<Database.RoleData> customRolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
+            // Get All Guild Roles that are allowed to make custom roles
+            // (These are in addition to boosters and anyone with ManageRoles Permission, who can always make roles)
+            List<Snowflake>? allowedCreatorRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
+            // Get Guild Member objects for all users that have a custom role in the database, using the store user id snowflakes 
+            Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId, customRolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleUserId)));
+            //TODO: Handle Error-ed Guild Member Objects
+            // For each User with a role in this server, check if they are allowed to have a custom role
             foreach (IGuildMember member in members.Entity)
             {
-                if (member.IsBoosting() || member.IsRoleModAdminOrOwner())
+                //Check if they are boosting or have ManageRoles permissions
+                try
                 {
+
+                } catch (Exception e)
+                {
+                    if (member.IsBoosting() || member.IsRoleModAdminOrOwner())
+                    {
+                        continue;
+                    }
+                    log.LogCritical($"Guild User Object for Snowflake {member.User.Value.ID.Value} has thrown error while checking boost status and permissions: {e}");
                     continue;
                 }
 
-                //Not a booster or mod
+                //Not a booster or mod, check configured allowed guild roles
                 var hasAllowedRole = false;
-                if (allowedRolesSnowflakes != null)
+                if (allowedCreatorRolesSnowflakes is { Count: > 0 })
                 {
-                    if (allowedRolesSnowflakes.Any(allowedRoleSnowflake => member.Roles.Contains(allowedRoleSnowflake)))
+                    if (allowedCreatorRolesSnowflakes.Any(allowedRoleSnowflake => member.Roles.Contains(allowedRoleSnowflake)))
                     {
                         hasAllowedRole = true;
                     }
@@ -305,14 +319,16 @@ namespace DiscordBoostRoleBot
 
                 if (hasAllowedRole)
                 {
+                    // User has one or more of the allowed roles, stop checking
                     continue;
                 }
 
                 //Not a booster or mod or allowed role user
-                Database.RoleData? roleCreated = rolesCreatedForGuild.FirstOrDefault(rcfg => rcfg.RoleUserId == member.User.Value.ID.Value);
+                Database.RoleData? roleCreated = customRolesCreatedForGuild.FirstOrDefault(rcfg => rcfg.RoleUserId == member.User.Value.ID.Value);
                 if (roleCreated == null)
                 {
                     //if no role is found in the database, this is messed up because the member's list was pulled from there, just give up
+                    log.LogCritical("Something is very messed up, check this out, the role for {} in Guild {} is no longer in the list", member.User.Value.ID.Value, serverId.Value);
                     break;
                 }
                 //Not allowed to have, delete role
