@@ -78,7 +78,7 @@ namespace DiscordBoostRoleBot
                         .AddConsole()
                         .AddFilter("System.Net.Http.HttpClient.*.LogicalHandler", level: LogLevel.Warning)
                         .AddFilter("System.Net.Http.HttpClient.*.ClientHandler", level: LogLevel.Warning)
-                        .AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", level: LogLevel.Trace)
+                        // .AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", level: LogLevel.Trace)
 #if DEBUG
                         .AddDebug()
                         .SetMinimumLevel(LogLevel.Debug)
