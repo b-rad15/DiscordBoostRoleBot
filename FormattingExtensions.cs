@@ -55,7 +55,7 @@ namespace DiscordBoostRoleBot {
         /// <returns>
         /// A user mention string.
         /// </returns>
-        public static string NameAndDiscriminator(this IUser user) => $"{user.Username}#{user.Discriminator}";
+        public static string NameAndDiscriminator(this IUser user) => user.Discriminator == 0 ? user.Username : $"{user.Username}#{user.Discriminator}";
         /// <summary>
         /// Gets the User's name and Discriminator, like Discord would show it
         /// </summary>

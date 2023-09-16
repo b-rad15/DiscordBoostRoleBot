@@ -81,7 +81,7 @@ namespace DiscordBoostRoleBot
                         // .AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", level: LogLevel.Trace)
 #if DEBUG
                         .AddDebug()
-                        .SetMinimumLevel(LogLevel.Debug)
+                        .SetMinimumLevel(LogLevel.Information)
 #else
                         .SetMinimumLevel(LogLevel.Information)
 #endif
@@ -209,17 +209,17 @@ namespace DiscordBoostRoleBot
                         switch (restError.Error.Code)
                         {
                             case DiscordError.InvalidGuild:
-                                log.LogWarning("Guild {guild} is invalid", guildId);
+                                log.LogWarning("Guild {guild} is invalid: {message}", guildId, restError.Error.Message);
                                 break;
                             case DiscordError.UnknownGuild:
-                                log.LogWarning("Guild {guild} is unknown", guildId);
+                                log.LogWarning("Guild {guild} is unknown: {message}", guildId, restError.Error.Message);
                                 break;
                             case DiscordError.UnknownMember:
                                 //TODO: Remove these from database
-                                log.LogWarning("Member {member} in guild {guild} is invalid", memberIdSnowflake,  guildId);
+                                log.LogWarning("Member {member} in guild {guild} is invalid: {message}", memberIdSnowflake,  guildId, restError.Error.Message);
                                 break;
                             default:
-                                log.LogWarning("Rest error getting member {memberId} because reason {reason}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title));
+                                log.LogWarning("Rest error getting member {memberId} because reason {reason}: {message}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
                                 break;
                         }
                     } else

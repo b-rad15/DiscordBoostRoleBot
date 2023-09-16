@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Remora.Discord.API.Abstractions.Objects;
+using Remora.Discord.API.Abstractions.Rest;
 using Remora.Rest.Core;
 using Remora.Results;
 using Z.EntityFramework.Plus;
@@ -12,10 +13,12 @@ namespace DiscordBoostRoleBot
     internal class RolesRemoveService : BackgroundService
     {
         private readonly ILogger<RolesRemoveService> _logger;
+        private readonly IDiscordRestGuildAPI _guildApi;
 
-        public RolesRemoveService(ILogger<RolesRemoveService> logger)
+        public RolesRemoveService(ILogger<RolesRemoveService> logger, IDiscordRestGuildAPI guildApi)
         {
             _logger = logger;
+            _guildApi = guildApi;
         }
 
         private readonly TimeSpan _executeInterval = TimeSpan.FromMinutes(Program.Config.RemoveRoleIntervalMinutes.HasValue ? Program.Config.RemoveRoleIntervalMinutes.Value : 5);
@@ -37,7 +40,16 @@ namespace DiscordBoostRoleBot
                     .Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
                 {
-                    _logger.LogInformation("{guildId}:", guildId);
+                    var guildInfoResult = await _guildApi.GetGuildPreviewAsync(guildId, ct: stoppingToken).ConfigureAwait(false);
+                    if (!guildInfoResult.IsSuccess)
+                    {
+                        _logger.LogWarning("Could not get guild info for {guildId} because {error}", guildId.Value, guildInfoResult.Error);
+                        _logger.LogInformation("Removing roles for {guildId}:", guildId.Value);
+                    } else
+                    {
+                        string guildName = guildInfoResult.Entity.Name;
+                        _logger.LogInformation("Removing roles for {guildId} - {guildName}:", guildId.Value, guildName);
+                    }
                     Result<List<IGuildMember>> removeBoosterResult = await Program.RemoveNonBoosterRoles(guildId, stoppingToken).ConfigureAwait(false);
                     if (!removeBoosterResult.IsSuccess)
                     {

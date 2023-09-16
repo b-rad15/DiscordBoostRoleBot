@@ -223,7 +223,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                     if (interactionContext.Message.HasValue)
                     {
                         IReadOnlyList<IAttachment> attachments = interactionContext.Message.Value.Attachments;
-                        if (attachments[0].ContentType.HasValue && attachments[0].ContentType.Value is "image/jpeg" or "image/png" or "image/gif")
+                        if (attachments[0].ContentType is { HasValue: true, Value: "image/jpeg" or "image/png" or "image/gif" })
                         {
                             image_url = attachments[0].Url;
                         }
@@ -240,7 +240,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                     {
                         _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
                         errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server").ConfigureAwait(false);
-                        if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                        if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                         {
                             return errResponse.IsSuccess
                                 ? Result.FromSuccess()
@@ -266,7 +266,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
                 default:
                     errResponse = await _feedbackService.SendContextualErrorAsync("I don't know how you invoked this command").ConfigureAwait(false);
-                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                     {
                         return errResponse.IsSuccess
                             ? Result.FromSuccess()
@@ -345,12 +345,46 @@ Note: All users with server role change permissions and boosters are allowed to 
             try
             {
                 roleColor = GetColorFromString(color);
-            }
-            catch (ArgumentException e)
+            } catch (ArgumentException e)
             {
                 _log.LogWarning("Color not found {color} because {e}", color, e);
-                errResponse = await _feedbackService.SendContextualErrorAsync($"Invalid color {color}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                errResponse = await _feedbackService
+                    .SendContextualErrorAsync(
+                        $"Invalid color {color}, must be in the format #XxXxXx or a common color name, check your spelling")
+                    .ConfigureAwait(false);
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi
+                    .DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
+                return deleteResponse;
+            } catch (FormatException e) {
+                _log.LogWarning("Color not found {color} because {e}", color, e);
+                errResponse = await _feedbackService
+                    .SendContextualErrorAsync(
+                                               $"Invalid color {color}, must be in the format #XxXxXx or a common color name, check your spelling (e.g. make sure 0s aren't Os, hex codes are only 0-9 and a-f letters)")
+                    .ConfigureAwait(false);
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
+                {
+                    return errResponse.IsSuccess
+                        ? Result.FromSuccess()
+                        : Result.FromError(result: errResponse);
+                }
+
+                await Task.Delay(DeleteOwnerMessageDelay).ConfigureAwait(false);
+                deleteResponse = await _restChannelApi
+                    .DeleteMessageAsync(_context.ChannelID, errResponse.Entity.First().ID).ConfigureAwait(false);
+                return deleteResponse;
+            } catch (Exception e)
+            {
+                _log.LogError(e, "Error getting color from string {color}: {reason}", color, e.Message);
+                errResponse = await _feedbackService.SendContextualErrorAsync($"Error getting color from string {color}").ConfigureAwait(false);
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -364,7 +398,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             if (!_context.GuildID.HasValue)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You are not sending this command in a guild, somehow your permissions are broken", ct: this.CancellationToken).ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -411,7 +445,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 _log.LogError($"Could not create role for {assign_to_member.User.Value.Mention()} because {roleResult.Error}");
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not create role for {assign_to_member.User.Value.Mention()}, make sure the bot's permissions are set correctly. Error = {roleResult.Error.Message}", ct: this.CancellationToken).ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -430,7 +464,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 _log.LogError($"Could not add role to database");
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     "Failed to track role, try again later", ct: this.CancellationToken).ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -449,7 +483,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 _log.LogError($"Could not make role because {roleApplyResult.Error}");
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     "Could not make role, make sure the bot's permissions are set correctly", ct: this.CancellationToken).ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -491,7 +525,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                                 .SendContextualErrorAsync(
                                     "Could not move role in list, check the bot's permissions and try again",
                                     ct: this.CancellationToken).ConfigureAwait(false);
-                            if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                            if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                             {
                                 return errResponse.IsSuccess
                                     ? Result.FromSuccess()
@@ -526,7 +560,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             msg += $"Made Role {role.Mention()} and assigned to {assign_to_member.Mention()}\n";
             FeedbackMessage message = new(msg.TrimEnd(), Colour: role.Colour);
             reply = await _feedbackService.SendContextualMessageAsync(message: message, ct: this.CancellationToken).ConfigureAwait(false);
-            if (!_context.User.IsOwner() || !reply.IsSuccess)
+            if (true || !_context.User.IsOwner() || !reply.IsSuccess)
             {
                 return reply.IsSuccess
                     ? Result.FromSuccess()
@@ -915,7 +949,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                     {
                         _log.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
                         errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server").ConfigureAwait(false);
-                        if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                        if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                         {
                             return errResponse.IsSuccess
                                 ? Result.FromSuccess()
@@ -930,7 +964,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                     break;
                 default:
                     errResponse = await _feedbackService.SendContextualErrorAsync("I don't know how you invoked this command").ConfigureAwait(false);
-                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                     {
                         return errResponse.IsSuccess
                             ? Result.FromSuccess()
@@ -961,7 +995,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             if (roleData == null)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("Role not found in database, check that this command is tracking it").ConfigureAwait(false); 
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -977,7 +1011,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             if (roleData.RoleUserId != _context.User.ID.Value && !member.IsRoleModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have permission to modify this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -1007,7 +1041,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 {
                     _log.LogWarning("Color not found {color} because {e}", new_color_string, e);
                     errResponse = await _feedbackService.SendContextualErrorAsync($"Invalid color {new_color_string}, must be in the format #XxXxXx or a common color name, check your spelling").ConfigureAwait(false);
-                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                     {
                         return !errResponse.IsSuccess
                             ? Result.FromError(result: errResponse)
@@ -1045,7 +1079,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 if (!getGuildResult.IsSuccess)
                 {
                     errResponse = await _feedbackService.SendContextualErrorAsync("Could not get info about the guild you are in, try again later").ConfigureAwait(false);
-                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                     {
                         return errResponse.IsSuccess
                             ? Result.FromSuccess()
@@ -1060,7 +1094,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 if (getGuildResult.Entity.PremiumTier < PremiumTier.Tier2)
                 {
                     errResponse = await _feedbackService.SendContextualErrorAsync($"Server must be boosted at least to tier 2 before adding role icons.\n{7 - getGuildResult.Entity.PremiumSubscriptionCount.Value} more boost needed").ConfigureAwait(false);
-                    if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                    if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                     {
                         return errResponse.IsSuccess
                             ? Result.FromSuccess()
@@ -1116,7 +1150,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not modify {role.Mention()} check that the bot has the correct permissions").ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -1133,7 +1167,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 //TODO: Change role back or queue a later write to the database
                 errResponse = await _feedbackService.SendContextualErrorAsync(
                     $"Could not modify database for {modifyRoleResult.Entity.Mention()}, try again later").ConfigureAwait(false);
-                if (!_context.User.IsOwner() || !errResponse.IsSuccess)
+                if (true || !_context.User.IsOwner() || !errResponse.IsSuccess)
                 {
                     return errResponse.IsSuccess
                         ? Result.FromSuccess()
@@ -1146,7 +1180,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             }
             replyResult = await _feedbackService.SendContextualSuccessAsync(
                 $"Successfully modified role {modifyRoleResult.Entity.Mention()}").ConfigureAwait(false);
-            if (!_context.User.IsOwner() || !replyResult.IsSuccess)
+            if (true || !_context.User.IsOwner() || !replyResult.IsSuccess)
             {
                 return replyResult.IsSuccess
                     ? Result.FromSuccess()
@@ -1190,7 +1224,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
             }
         }
-        public static string SpacingSequence(int indentLevel) => "\u02ea" + string.Concat(Enumerable.Repeat("\u02cd", indentLevel));
+        public static string SpacingSequence(int indentLevel) => '\u02ea' + string.Concat(Enumerable.Repeat('\u02cd', indentLevel));
 
         [Command("help")]
         [Description("Print the help message for Boost Role Manager")]
