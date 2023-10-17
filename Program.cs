@@ -26,10 +26,12 @@ using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Responders;
 using Remora.Discord.Gateway;
 using Remora.Discord.Gateway.Extensions;
+using Remora.Discord.Hosting.Options;
 using Remora.Discord.Rest.Extensions;
 using Remora.Extensions.Options.Immutable;
 using Remora.Rest.Core;
 using Remora.Rest.Results;
+using Serilog;
 using SixLabors.ImageSharp.Formats;
 using SQLitePCL;
 using Z.EntityFramework.Plus;
@@ -38,9 +40,6 @@ namespace DiscordBoostRoleBot
 {
     public class Program
     {
-        // Get Token from Configuration file
-        internal static readonly Configuration Config = Configuration.ReadConfig();
-
         private static IDiscordRestGuildAPI? _restGuildApi;
         private static IDiscordRestUserAPI? _restUserApi;
         public static bool IsInitialized() => _restGuildApi is not null;
@@ -48,56 +47,54 @@ namespace DiscordBoostRoleBot
         public static ILogger<Program> log;
         public static HttpClient httpClient = new();
 
+        public static ulong BotOwnerId = 0;
+
         public static async Task Main(string[] args)
         {
             //Build the service
-            IHost? host = Host.CreateDefaultBuilder()
-                .AddDiscordService(_ => Config.Token)
-                .ConfigureServices(
-                    (_, services) =>
-                    {
-                        services
-                            .AddDiscordRest(_ => Config.Token)
-                            .AddDiscordCommands(true)
-                            .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
-                            .AddCommandTree()
-                            .WithCommandGroup<RoleCommands>()
-                            .Finish()
-                            .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
-                            .AddCommandTree()
-                            .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
-                            .Finish()
-                            .AddCommandTree()
-                            .WithCommandGroup<CommandResponderConfigCommands>()
-                            .Finish()
-                            .AddHostedService<RolesRemoveService>()
-                            .Configure<DiscordGatewayClientOptions>(g => g.Intents |= GatewayIntents.MessageContents);
-                    })
-                .ConfigureLogging(
-                    c => c
-                        .AddConsole()
-                        .AddFilter("System.Net.Http.HttpClient.*.LogicalHandler", level: LogLevel.Warning)
-                        .AddFilter("System.Net.Http.HttpClient.*.ClientHandler", level: LogLevel.Warning)
-                        // .AddFilter("Microsoft.Extensions.Http.DefaultHttpClientFactory", level: LogLevel.Trace)
-#if DEBUG
-                        .AddDebug()
-                        .SetMinimumLevel(LogLevel.Information)
-#else
-                        .SetMinimumLevel(LogLevel.Information)
-#endif
-                )
-                .UseConsoleLifetime()
-                .Build();
+            IHost? host = Host.CreateDefaultBuilder(args)
+                              .AddDiscordService(services =>
+                                  services.GetRequiredService<IConfiguration>().GetValue<string>("Token")!)
+                              .ConfigureServices(
+                                  (_, services) =>
+                                  {
+                                      services
+                                          .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
+                                          .AddCommandTree()
+                                          .WithCommandGroup<RoleCommands>()
+                                          .Finish()
+                                          .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
+                                          .AddCommandTree()
+                                          .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
+                                          .Finish()
+                                          .AddCommandTree()
+                                          .WithCommandGroup<CommandResponderConfigCommands>()
+                                          .Finish()
+                                          .AddHostedService<RolesRemoveService>()
+                                          .Configure<DiscordGatewayClientOptions>(g =>
+                                              g.Intents |= GatewayIntents.MessageContents)
+                                          .AddDiscordCommands(true)
+                                          ;
+                                      services.Configure<DiscordServiceOptions>(_ => new()
+                                          {
+                                              TerminateApplicationOnCriticalGatewayErrors = true,
+                                          });
+                                  })
+                              .UseSerilog((hostingContext, services, loggerConfiguration) => loggerConfiguration
+                                  .ReadFrom.Configuration(hostingContext.Configuration))
+                              .UseConsoleLifetime()
+                              .Build();
             IServiceProvider? services = host.Services;
             log = services.GetRequiredService<ILogger<Program>>();
-            LogFactory = services.GetRequiredService<ILoggerFactory>();
             _restGuildApi = services.GetRequiredService<IDiscordRestGuildAPI>();
             _restUserApi = services.GetRequiredService<IDiscordRestUserAPI>();
+            var configuration = services.GetRequiredService<IConfiguration>();
+            BotOwnerId = configuration.GetValue<ulong>("BotOwnerId");
             Snowflake? debugServer = null;
-            ulong? debugServerId = Config.TestServerId;
+            var debugServerId = configuration.GetValue<string?>("TestServerId");
             if (debugServerId is not null)
             {
-                if ((debugServer = new Snowflake(debugServerId.Value)) is null)
+                if (!Snowflake.TryParse(debugServerId, out debugServer))
                 {
                     log.LogWarning("Failed to parse debug server from environment");
                 }
@@ -108,50 +105,39 @@ namespace DiscordBoostRoleBot
             }
 
             SlashService slashService = services.GetRequiredService<SlashService>();
-            Result checkSlashSupport = slashService.SupportsSlashCommands();
-            if(!checkSlashSupport.IsSuccess)
-            {
-                log.LogCritical("The registered commands of the bot don't support slash commands: {Reason}",
-                    checkSlashSupport.Error?.Message);
-            }
-            else
-            {
-                if (args.Contains("--purge") && debugServer.HasValue){
-                    Result purgeSlashCommands = await slashService
-                        .UpdateSlashCommandsAsync(guildID: debugServer, treeName: nameof(EmptyCommands))
-                        .ConfigureAwait(false);
-                    if (!purgeSlashCommands.IsSuccess)
-                    {
-                        log.LogWarning("Failed to purge guild slash commands: {Reason}", purgeSlashCommands.Error?.Message);
-                    }
-                    else
-                    {
-                        log.LogInformation("Purge slash commands from {Reason}", debugServer.Value);
-                    }
-                }
-#if DEBUG
-                Result updateSlash = await slashService.UpdateSlashCommandsAsync(guildID: debugServer).ConfigureAwait(false);
-#else
-                Result updateSlash = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
-#endif
-                if (!updateSlash.IsSuccess)
+            if (args.Contains("--purge") && debugServer.HasValue){
+                Result purgeSlashCommands = await slashService
+                                                  .UpdateSlashCommandsAsync(guildID: debugServer, treeName: nameof(EmptyCommands))
+                                                  .ConfigureAwait(false);
+                if (!purgeSlashCommands.IsSuccess)
                 {
-                    if(updateSlash.Error is RestResultError<RestError> restError)
-                        log.LogCritical("Failed to update slash commands: {code} {reason}", restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
-                    else
-                        log.LogCritical("Failed to update slash commands: {Reason}", updateSlash.Error?.Message);
+                    log.LogWarning("Failed to purge guild slash commands: {Reason}", purgeSlashCommands.Error?.Message);
                 }
                 else
                 {
-                    log.LogInformation($"Successfully created commands {(debugServer is not null ? "on " + debugServer.Value : "global")}");
+                    log.LogInformation("Purge slash commands from {Reason}", debugServer.Value);
                 }
+            }
+        #if DEBUG
+            Result updateSlash = await slashService.UpdateSlashCommandsAsync(guildID: debugServer).ConfigureAwait(false);
+        #else
+                Result updateSlash = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
+        #endif
+            if (!updateSlash.IsSuccess)
+            {
+                if(updateSlash.Error is RestResultError<RestError> restError)
+                    log.LogCritical("Failed to update slash commands: {code} {reason}", restError.Error.Code, restError.Error.Message);
+                else
+                    log.LogCritical("Failed to update slash commands: {Reason}", updateSlash.Error?.Message);
+            }
+            else
+            {
+                log.LogInformation($"Successfully created commands {(debugServer is not null ? "on " + debugServer.Value : "global")}");
             }
             await host.RunAsync().ConfigureAwait(false);
 
             Console.WriteLine("Bye bye");
         }
-
-        public static ILoggerFactory LogFactory { get; set; }
 
         internal static async Task<Result<IEnumerable<IGuildMember>>> GetGuildMembers(Snowflake guildId, IRole? role = null, bool checkIsBoosting = false, bool canBeMod = true, bool isBotOwner = false)
         {
@@ -205,8 +191,9 @@ namespace DiscordBoostRoleBot
                 {
                     if (guildMemberResult.Error is RestResultError<RestError> restError)
                     {
+                        if(!restError.Error.Code.HasValue) log.LogWarning("Rest error getting member {memberId} because reason {reason}: {message}", memberIdSnowflake.Value, "Code Not Given", restError.Error.Message);
                         // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                        switch (restError.Error.Code)
+                        switch (restError.Error.Code.Value)
                         {
                             case DiscordError.InvalidGuild:
                                 log.LogWarning("Guild {guild} is invalid: {message}", guildId, restError.Error.Message);
@@ -219,7 +206,7 @@ namespace DiscordBoostRoleBot
                                 log.LogWarning("Member {member} in guild {guild} is invalid: {message}", memberIdSnowflake,  guildId, restError.Error.Message);
                                 break;
                             default:
-                                log.LogWarning("Rest error getting member {memberId} because reason {reason}: {message}", memberIdSnowflake.Value, restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
+                                log.LogWarning("Rest error getting member {memberId} because reason {reason}: {message}", memberIdSnowflake.Value, restError.Error.Code, restError.Error.Message);
                                 break;
                         }
                     } else
@@ -237,8 +224,9 @@ namespace DiscordBoostRoleBot
                     {
                         if (getPermsResult.Error is RestResultError<RestError> restError)
                         {
+                            if (!restError.Error.Code.HasValue) log.LogWarning("Rest error getting member {memberId}'s permissions in {guild} because reason {reason}: {message}", memberIdSnowflake.Value, guildId, "Code Not Given", restError.Message);
                             // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
-                            switch (restError.Error.Code)
+                            switch (restError.Error.Code.Value)
                             {
                                 case DiscordError.InvalidGuild:
                                     log.LogWarning("Guild {guild} is invalid", guildId);
@@ -251,7 +239,7 @@ namespace DiscordBoostRoleBot
                                     log.LogWarning("Member {member} in guild {guild} is invalid", memberIdSnowflake, guildId);
                                     break;
                                 default:
-                                    log.LogWarning("Rest error getting member {memberId}'s permissions in {guild} because reason {reason}", memberIdSnowflake.Value, guildId, restError.Error.Code.Humanize(LetterCasing.Title));
+                                    log.LogWarning("Rest error getting member {memberId}'s permissions in {guild} because reason {reason}: {message}", memberIdSnowflake.Value, guildId, restError.Error.Code, restError.Message);
                                     break;
                             }
                         } else
@@ -341,7 +329,7 @@ namespace DiscordBoostRoleBot
                             log.LogDebug("Role {role} was deleted without using the database, tell {server} not to do that pls", roleCreated.RoleId, serverId);
                         } else
                         {
-                            log.LogError("Rest error deleting role {role} because reason {reason}", roleCreated.RoleId, restError.Error.Code.Humanize(LetterCasing.Title));
+                            log.LogError("Rest error deleting role {role} because reason {reason}", roleCreated.RoleId, restError.Error.Code);
                         }
                     } else
                     {
@@ -479,7 +467,7 @@ namespace DiscordBoostRoleBot
                     }
                     else
                     {
-                        log.LogWarning($"Could not get bot user because {currentBotUserResult.Error}");
+                        log.LogWarning("Could not get bot user because {error}", currentBotUserResult.Error);
                         msg +=
                             "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                     }

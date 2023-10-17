@@ -123,11 +123,16 @@ namespace DiscordBoostRoleBot {
         public static bool IsOwner(this IGuildMember member) => member.User.HasValue && member.User.Value.IsOwner();
         public static bool IsOwner(this IUser user)
         {
-            return user.ID.Value == Program.Config.BotOwnerId;
+            return user.ID.IsOwner();
+        }
+
+        public static bool IsOwner(this Snowflake userSnowflake)
+        {
+            return userSnowflake.Value.IsOwner();
         }
         public static bool IsOwner(this ulong userId)
         {
-            return userId == Program.Config.BotOwnerId;
+            return userId == Program.BotOwnerId;
         }
         public static bool IsRoleModAdminOrOwner(this IGuildMember member)
         {
@@ -137,7 +142,7 @@ namespace DiscordBoostRoleBot {
             //and those permissions include manage roles or admin (since having admin != manage roles)
             return (member.Permissions.Value.HasPermission(DiscordPermission.ManageRoles) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
                    //or it's a me
-                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+                   || member.User.Value.ID.Value == Program.BotOwnerId;
         }
         public static bool IsChannelModAdminOrOwner(this IGuildMember member)
         {
@@ -147,7 +152,7 @@ namespace DiscordBoostRoleBot {
             //and those permissions include manage roles or admin (since having admin != manage roles)
             return (member.Permissions.Value.HasPermission(DiscordPermission.ManageChannels) || member.Permissions.Value.HasPermission(DiscordPermission.Administrator))
                    //or it's a me
-                     || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+                     || member.User.Value.ID.Value == Program.BotOwnerId;
         }
         public static bool HasAllPermsAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
         {
@@ -157,7 +162,7 @@ namespace DiscordBoostRoleBot {
             //and those permissions include manage roles or admin (since having admin != manage roles)
             return (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.All(perm=> member.Permissions.Value.HasPermission(perm)))
                    //or it's a me
-                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+                   || member.User.Value.ID.Value == Program.BotOwnerId;
         }
         public static bool HasAnyPermsAdminOrOwner(this IGuildMember member, params DiscordPermission[] permissions)
         {
@@ -167,7 +172,7 @@ namespace DiscordBoostRoleBot {
             //and those permissions include manage roles or admin (since having admin != manage roles)
             return (member.Permissions.Value.HasPermission(DiscordPermission.Administrator) || permissions.Any(perm=> member.Permissions.Value.HasPermission(perm)))
                    //or it's a me
-                   || member.User.Value.ID.Value == Program.Config.BotOwnerId;
+                   || member.User.Value.ID.Value == Program.BotOwnerId;
         }
     }
     public static class OtherExtensions

@@ -9,9 +9,11 @@ using Remora.Commands.Attributes;
 using Remora.Commands.Groups;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
+using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Attributes;
 using Remora.Discord.Commands.Conditions;
 using Remora.Discord.Commands.Contexts;
+using Remora.Discord.Commands.Extensions;
 using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Feedback.Services;
 using Remora.Discord.Commands.Services;
@@ -42,20 +44,23 @@ namespace DiscordBoostRoleBot
         public async Task<Result> SetPrefix([Description("Command Prefix to set, can be any string")] string prefix)
         {
             IGuildMember executorGuildMember;
+            PartialGuild executorGuild;
             Result<IReadOnlyList<IMessage>> errResponse;
             Snowflake? messageId = null;
             var responseMessage = string.Empty;
             switch (_context)
             {
                 case InteractionContext interactionContext:
-                    executorGuildMember = interactionContext.Member.Value;
+                    executorGuild = new(interactionContext.Interaction.GuildID);
+                    executorGuildMember = interactionContext.Interaction.Member.Value;
                     break;
                 case MessageContext messageContext:
                     {
-                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        executorGuild = new(messageContext.GuildID);
+                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.Message.Author.Value.ID).ConfigureAwait(false);
                         if (!guildMemberResult.IsSuccess)
                         {
-                            _logger.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                            _logger.LogWarning($"Error responding to message {messageContext.Message.ID} because {guildMemberResult.Error}");
                             errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server", options: new FeedbackMessageOptions
                             {
                                 MessageFlags = MessageFlags.Ephemeral
@@ -79,7 +84,7 @@ namespace DiscordBoostRoleBot
 
             if (!executorGuildMember.Permissions.HasValue)
             {
-                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, _context.GuildID.Value);
+                Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, executorGuild.ID.Value, this.CancellationToken);
                 if (!getPermsResult.IsSuccess)
                 {
                     errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
@@ -102,7 +107,7 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(result: errResponse);
             }
 
-            if (!_context.GuildID.HasValue)
+            if (!executorGuild.ID.HasValue)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You are not in a server, cannot set prefix");
                 return errResponse.IsSuccess
@@ -110,7 +115,7 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(errResponse);
             }
 
-            Result setPrefixResult = await Database.SetPrefix(_context.GuildID.Value, prefix);
+            Result setPrefixResult = await Database.SetPrefix(executorGuild.ID.Value, prefix);
             if (!setPrefixResult.IsSuccess)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("Failed to set prefix");
@@ -129,10 +134,16 @@ namespace DiscordBoostRoleBot
         [Description("Get the prefix for the bot")]
         public async Task<Result> GetPrefix()
         {
-            string prefix = PrefixSetter.DefaultPrefix;
-            if (_context.GuildID.HasValue)
+            var guildId = _context switch
             {
-                prefix = await Database.GetPrefix(_context.GuildID.Value);
+                InteractionContext interactionContext => interactionContext.Interaction.GuildID,
+                MessageContext messageContext => messageContext.GuildID,
+                _ => throw new ArgumentOutOfRangeException(nameof(_context), _context, null)
+            };
+            string prefix = PrefixSetter.DefaultPrefix;
+            if (guildId.HasValue)
+            {
+                prefix = await Database.GetPrefix(guildId.Value);
             }
 
             string replyString = prefix.Contains(' ') ? $"Prefix is \"{prefix}\"" : $"Prefix is {prefix}";
@@ -147,30 +158,34 @@ namespace DiscordBoostRoleBot
     {
         public const string OverridePrefix = "&DiscordBoostRoleBot&";
         public const string DefaultPrefix = "&";
-        private readonly ICommandContext _context;
+        private readonly IMessageContext _context;
+        private readonly ILogger<PrefixSetter> _log;
 
-        public PrefixSetter(ICommandContext context)
+        public PrefixSetter(IMessageContext context, ILogger<PrefixSetter> log)
         {
-            _context = context;
+            _context  = context;
+            _log = log;
         }
 
         public async ValueTask<Result<(bool Matches, int ContentStartIndex)>> MatchesPrefixAsync(string content, CancellationToken ct = new CancellationToken())
         {
-            if (_context.User.IsOwner() && content.StartsWith(OverridePrefix))
+            if (!_context.TryGetUserID(out Snowflake userId))
+            {
+                _log.LogWarning("Could not get user id from context {contextType}", _context.GetType());
+                return new InvalidOperationException("Could not get user id from context");
+            }
+            if (userId.IsOwner() && content.StartsWith(OverridePrefix))
             {
                 return Result<(bool Matches, int ContentStartIndex)>.FromSuccess((true, OverridePrefix.Length));
             }
-
             string prefix;
-            if(_context.GuildID.HasValue)
-            {
-                prefix = await Database.GetPrefix(_context.GuildID.Value);
-            }
-            else
-            {
+            if (!_context.TryGetGuildID(out Snowflake guildId)){
+                _log.LogDebug("Could not get guild id from context {contextType}", _context.GetType());
                 prefix = DefaultPrefix;
+            } else
+            {
+                prefix = await Database.GetPrefix(guildId.Value);
             }
-
             return Result<(bool Matches, int ContentStartIndex)>.FromSuccess(content.StartsWith(prefix) ? (true, prefix.Length) : (false, -1));
         }
     }

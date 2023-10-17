@@ -15,3 +15,6 @@ DiscordBoostRoleBot.service
 *.json
 /DiscordBotTests/obj
 /DiscordBotTests/bin
+/Logs
+*.tar
+/DockerCopyToServer.ps1

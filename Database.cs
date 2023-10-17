@@ -12,6 +12,7 @@ using Remora.Rest.Core;
 using Remora.Results;
 using SQLitePCL;
 using Remora.Discord;
+using Serilog;
 
 namespace DiscordBoostRoleBot
 {
@@ -98,12 +99,11 @@ namespace DiscordBoostRoleBot
             public DbSet<MessageReactorSettings> MessageReactorSettings { get; set; }
             public DbSet<ServerSettings> ServerwideSettings { get; set; }
 
-            private readonly ILoggerFactory _loggerFactory = Program.LogFactory;
+            private readonly ILoggerFactory _loggerFactory = LoggerFactory.Create(builder=>builder.AddSerilog());
 
             protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
                 optionsBuilder.UseSqlite("Data Source=RolesDatabase.db;")
-                    // TODO: Figure out logging
-                    // .LogTo(_loggerStatic.LogError)
+                    //https://learn.microsoft.com/en-us/ef/core/logging-events-diagnostics/extensions-logging?tabs=v3
                     .UseLoggerFactory(_loggerFactory)
                     .ConfigureWarnings(b=>b.Log(
                         (RelationalEventId.ConnectionOpening, LogLevel.Trace),
@@ -171,11 +171,11 @@ namespace DiscordBoostRoleBot
         }
 
         public static async Task<string> GetPrefix(Snowflake guildId) => await GetPrefix(guildId.Value).ConfigureAwait(false);
-        public static async Task<string> GetPrefix(ulong guildId)
+        public static async Task<string> GetPrefix(ulong guildId, string? defaultPrefix = null)
         {
             await using DiscordDbContext database = new();
             string? prefix = await database.ServerwideSettings.Where(ss => ss.ServerId == guildId).Select(ss=>ss.Prefix).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
-            return prefix ?? PrefixSetter.DefaultPrefix;
+            return prefix ?? (defaultPrefix ?? PrefixSetter.DefaultPrefix);
         }
         public static async Task<Result> SetPrefix(Snowflake guildId, string prefix) => await SetPrefix(guildId.Value, prefix).ConfigureAwait(false);
         public static async Task<Result> SetPrefix(ulong guildId, string prefix)

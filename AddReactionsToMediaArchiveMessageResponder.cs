@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Humanizer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualBasic;
 using Remora.Commands.Attributes;
@@ -38,13 +39,15 @@ namespace DiscordBoostRoleBot
 {
     internal class AddReactionsToMediaArchiveMessageResponder : IResponder<IMessageCreate>
     {
-        private readonly IDiscordRestChannelAPI _channelApi;
+        private readonly IDiscordRestChannelAPI                              _channelApi;
         private readonly ILogger<AddReactionsToMediaArchiveMessageResponder> _logger;
+        private readonly IConfiguration                                      _config;
 
-        public AddReactionsToMediaArchiveMessageResponder(IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveMessageResponder> logger)
+        public AddReactionsToMediaArchiveMessageResponder(IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveMessageResponder> logger, IConfiguration config)
         {
-            _channelApi = channelApi;
-            _logger = logger;
+            _channelApi  = channelApi;
+            _logger      = logger;
+            _config = config;
         }
 
         public async Task<Result> RespondAsync(IMessageCreate gatewayEvent, CancellationToken ct = new())
@@ -59,7 +62,7 @@ namespace DiscordBoostRoleBot
             Snowflake messageId = gatewayEvent.ID;
             Snowflake channelId = gatewayEvent.ChannelID;
 #if DEBUG
-            if (Program.Config.TestServerId is not null && Program.Config.TestServerId != serverId)
+            if (_config.GetValue<ulong?>("TestServerId") is not null && _config.GetValue<ulong>("TestServerId") != serverId)
             {
                 _logger.LogDebug("{server} is not the debug server, skipping", serverId);
                 return Result.FromSuccess();
@@ -134,28 +137,31 @@ namespace DiscordBoostRoleBot
         [Description("Change the settings for your server")]
         public async Task<Result> SetReactorSettings(
             [Description("The channel to react in")]
-            [ChannelTypes(ChannelType.GuildPublicThread, ChannelType.GuildPrivateThread, ChannelType.GuildText)]
+            [ChannelTypes(ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.GuildText)]
             IChannel? channel = null,
             [Description("The User who's messages will be reacted to")]
             IGuildMember? user = null,
             [Description("Emotes to react with, separated with ;")]
             string? emotesString = null)
         {
-            IGuildMember executorGuildMember;
+            IGuildMember                    executorGuildMember;
+            PartialGuild                    executionGuild;
             Result<IReadOnlyList<IMessage>> errResponse;
-            Snowflake? messageId = null;
-            var responseMessage = string.Empty;
+            Snowflake?                      messageId       = null;
+            var                             responseMessage = string.Empty;
             switch (_context)
             {
                 case InteractionContext interactionContext:
-                    executorGuildMember = interactionContext.Member.Value;
+                    executionGuild          = new(interactionContext.Interaction.GuildID);
+                    executorGuildMember = interactionContext.Interaction.Member.Value;
                     break;
                 case MessageContext messageContext:
                     {
-                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        executionGuild = new(messageContext.GuildID);
+                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.Message.Author.Value.ID).ConfigureAwait(false);
                         if (!guildMemberResult.IsSuccess)
                         {
-                            _logger.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                            _logger.LogWarning($"Error responding to message {messageContext.Message.ID} because {guildMemberResult.Error}");
                             errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server", options: new FeedbackMessageOptions
                             {
                                 MessageFlags = MessageFlags.Ephemeral
@@ -217,7 +223,7 @@ namespace DiscordBoostRoleBot
 
             await using Database.DiscordDbContext database = new();
             Database.MessageReactorSettings? serverSettings = await 
-                database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+                database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
             var newEntry = false;
             //TODO: Test emotes can be reacted before doing it
             if (serverSettings == null)
@@ -233,7 +239,7 @@ namespace DiscordBoostRoleBot
 
                         _logger.LogCritical(
                             "Could not respond to this message, this should only happen if discord's api is down but happened because rest error {code}: {error}",
-                            restError1.Error.Code.Humanize(LetterCasing.Title), restError1.Error.Message);
+                            restError1.Error.Code, restError1.Error.Message);
                     }
                     else
                     {
@@ -247,7 +253,7 @@ namespace DiscordBoostRoleBot
                 newEntry = true;
                 serverSettings = new Database.MessageReactorSettings
                 {
-                    ServerId = _context.GuildID.Value.Value,
+                    ServerId = executionGuild.ID.Value.Value,
                     Emotes = emotesString,
                     UserIds = user.User.Value.ID.Value,
                     ChannelId = channel.ID.Value
@@ -290,7 +296,7 @@ namespace DiscordBoostRoleBot
 
                 _logger.LogCritical(
                     "Could not respond to this message, this should only happen if discord's api is down but happened because rest error {code}: {error}",
-                    restError2.Error.Code.Humanize(LetterCasing.Title), restError2.Error.Message);
+                    restError2.Error.Code, restError2.Error.Message);
             }
             else
             {
@@ -305,21 +311,21 @@ namespace DiscordBoostRoleBot
 
         [Command("react-set-user-from-message")]
         [Description("Set the user to track based on a message id (used for tracking webhooks)")]
-        public async Task<Result> SetReactUserFromMessage([Description("The message id to base the command on")] ulong message_id, [Description("Channel the message is in")][ChannelTypes(ChannelType.GuildPrivateThread, ChannelType.GuildPublicThread, ChannelType.GuildText)] IChannel channel)
+        public async Task<Result> SetReactUserFromMessage([Description("The message id to base the command on")] ulong message_id, [Description("Channel the message is in")][ChannelTypes(ChannelType.PrivateThread, ChannelType.PublicThread, ChannelType.GuildText)] IChannel channel)
         {
             IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
             switch (_context)
             {
                 case InteractionContext interactionContext:
-                    executorGuildMember = interactionContext.Member.Value;
+                    executorGuildMember = interactionContext.Interaction.Member.Value;
                     break;
                 case MessageContext messageContext:
                     {
-                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.Message.Author.Value.ID).ConfigureAwait(false);
                         if (!guildMemberResult.IsSuccess)
                         {
-                            _logger.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                            _logger.LogWarning($"Error responding to message {messageContext.Message.ID} because {guildMemberResult.Error}");
                             errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server", options: new FeedbackMessageOptions
                             {
                                 MessageFlags = MessageFlags.Ephemeral
@@ -363,7 +369,7 @@ namespace DiscordBoostRoleBot
 
                     _logger.LogCritical(
                         "Could not respond to this message, this should only happen if discord's api is down but happened because rest error {code}: {error}",
-                        restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
+                        restError.Error.Code, restError.Error.Message);
                 }
                 else
                 {
@@ -375,18 +381,18 @@ namespace DiscordBoostRoleBot
             }
 
             IMessage message = messageResult.Entity;
-            return await SetReactUserFromMessage(message).ConfigureAwait(false);
+            return await SetReactUserFromMessageInternal(message).ConfigureAwait(false);
         }
 
         [CommandType(ApplicationCommandType.Message)]
         [Command("react-set-user")]
         [Ephemeral]
-        public async Task<Result> SetReactUserFromMessage()
+        public async Task<Result> SetReactUserFromMessage(IPartialMessage message = null)
         {
             var interactionContext = _context as InteractionContext;
             IGuildMember executorGuildMember;
             Result<IReadOnlyList<IMessage>> errResponse;
-            executorGuildMember = interactionContext.Member.Value;
+            executorGuildMember = interactionContext.Interaction.Member.Value;
 
             if (!executorGuildMember.IsChannelModAdminOrOwner())
             {
@@ -398,8 +404,8 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(result: errResponse);
             }
-            IPartialMessage? message = interactionContext?.Data.Resolved.Value.Messages.Value.FirstOrDefault().Value;
-            if (message is not null) return await SetReactUserFromMessage(message).ConfigureAwait(false);
+            IPartialMessage? msg = (interactionContext?.Interaction.Data.Value.AsT0)?.Resolved.Value.Messages.Value.FirstOrDefault().Value;
+            if (msg is not null) return await SetReactUserFromMessageInternal(msg).ConfigureAwait(false);
             Result<IReadOnlyList<IMessage>> respondResult = await _feedbackService.SendContextualSuccessAsync("No Message Found", options:new FeedbackMessageOptions
             {
                 MessageFlags = MessageFlags.Ephemeral
@@ -408,11 +414,17 @@ namespace DiscordBoostRoleBot
                 ? Result.FromSuccess()
                 : Result.FromError(respondResult);
         }
-        public async Task<Result> SetReactUserFromMessage([Description("Any message from the user")] IPartialMessage message)
+        public async Task<Result> SetReactUserFromMessageInternal([Description("Any message from the user")] IPartialMessage message)
         {
+            PartialGuild executionGuild = new(_context switch
+            {
+                InteractionContext interactionContext => interactionContext.Interaction.GuildID,
+                TextCommandContext messageContext => messageContext.GuildID,
+                _ => throw new ArgumentOutOfRangeException(nameof(_context), _context, null),
+            });
             await using Database.DiscordDbContext database = new();
             Database.MessageReactorSettings? serverSettings = await
-                database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+                database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
             Result<IReadOnlyList<IMessage>> respondResult;
             if (serverSettings is null)
             {
@@ -427,7 +439,7 @@ namespace DiscordBoostRoleBot
 
                     _logger.LogCritical(
                         "Could not respond to this message, this should only happen if discord's api is down but happened because rest error {code}: {error}",
-                        restError.Error.Code.Humanize(LetterCasing.Title), restError.Error.Message);
+                        restError.Error.Code, restError.Error.Message);
                 }
                 else
                 {
@@ -481,17 +493,20 @@ namespace DiscordBoostRoleBot
             }
 
             IGuildMember executorGuildMember;
+            PartialGuild executionGuild;
             switch (_context)
             {
                 case InteractionContext interactionContext:
-                    executorGuildMember = interactionContext.Member.Value;
+                    executionGuild          = new(interactionContext.Interaction.GuildID);
+                        executorGuildMember = interactionContext.Interaction.Member.Value;
                     break;
                 case MessageContext messageContext:
                     {
-                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.User.ID).ConfigureAwait(false);
+                        executionGuild = new(messageContext.GuildID);
+                        Result<IGuildMember> guildMemberResult = await _guildApi.GetGuildMemberAsync(guildID: messageContext.GuildID.Value, userID: messageContext.Message.Author.Value.ID).ConfigureAwait(false);
                         if (!guildMemberResult.IsSuccess)
                         {
-                            _logger.LogWarning($"Error responding to message {messageContext.MessageID} because {guildMemberResult.Error}");
+                            _logger.LogWarning($"Error responding to message {messageContext.Message.ID} because {guildMemberResult.Error}");
                             errResponse = await _feedbackService.SendContextualErrorAsync("Make sure you are in a server", options: new FeedbackMessageOptions
                             {
                                 MessageFlags = MessageFlags.Ephemeral
@@ -526,8 +541,8 @@ namespace DiscordBoostRoleBot
             await using Database.DiscordDbContext database = new();
             if (emotesString is null)
             {
-                emotesString = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value).Select(mrs => mrs.Emotes)
-                    .FirstOrDefaultAsync().ConfigureAwait(false);
+                emotesString = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).Select(mrs => mrs.Emotes)
+                                             .FirstOrDefaultAsync().ConfigureAwait(false);
                 if (emotesString is null)
                 {
                     Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
@@ -566,16 +581,16 @@ namespace DiscordBoostRoleBot
         [CommandType(ApplicationCommandType.Message)]
         [Ephemeral]
         // [SuppressInteractionResponse(true)]
-        public async Task<Result> ReactToMessage()
+        public async Task<Result> ReactToMessage(IPartialMessage message = null)
         {
             var interactionContext = _context as InteractionContext;
             // var createResponseResult = await _interactionApi.CreateInteractionResponseAsync(interactionContext.ID,
             //     interactionContext.Token,
             //     new InteractionResponse(InteractionCallbackType.DeferredChannelMessageWithSource) {Data = new InteractionCallbackData{Flags = MessageFlags.Ephemeral | MessageFlags.Loading}});
             
-            IPartialMessage? message = interactionContext?.Data.Resolved.Value.Messages.Value.First().Value;
+            IPartialMessage? messageResp = interactionContext?.Interaction.Data.Value.AsT0.Resolved.Value.Messages.Value.First().Value;
             Result<IReadOnlyList<IMessage>> errResponse;
-            if (message is null)
+            if (messageResp is null)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("There is no message", options: new FeedbackMessageOptions
                 {
@@ -585,7 +600,7 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(result: errResponse);
             }
-            if (!interactionContext!.Member.Value.IsChannelModAdminOrOwner())
+            if (!interactionContext!.Interaction.Member.Value.IsChannelModAdminOrOwner())
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("You do not have mod permissions", options: new FeedbackMessageOptions
                 {
@@ -596,8 +611,9 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(result: errResponse);
             }
             await using Database.DiscordDbContext database = new();
-            Database.MessageReactorSettings? dbItem = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == _context.GuildID.Value.Value)
-                .FirstOrDefaultAsync().ConfigureAwait(false);
+            PartialGuild                                executionGuild = new(interactionContext.Interaction.GuildID);
+            Database.MessageReactorSettings? dbItem = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value)
+                                                                    .FirstOrDefaultAsync().ConfigureAwait(false);
             if (dbItem is null)
             {
                 Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
@@ -611,13 +627,13 @@ namespace DiscordBoostRoleBot
             }
 
             var msg = "";
-            Optional<Snowflake> messageId = message.ID;
+            Optional<Snowflake> messageId = messageResp.ID;
             foreach (string emote in dbItem.Emotes.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
             {
                 string emotePrepped = AddReactionsToMediaArchiveMessageResponder.PrepEmoteForReaction(emote);
                 if (!AddReactionsToMediaArchiveMessageResponder.CheckEmoteForReaction(emotePrepped))
                     _logger.LogWarning("{emote} does not look like right format", emotePrepped);
-                Result addReactionsResult = await _channelApi.CreateReactionAsync(message.ChannelID.Value, messageId.Value, emotePrepped).ConfigureAwait(false);
+                Result addReactionsResult = await _channelApi.CreateReactionAsync(messageResp.ChannelID.Value, messageId.Value, emotePrepped).ConfigureAwait(false);
                 if (!addReactionsResult.IsSuccess)
                 {
                     _logger.LogError("Could not react to message {message} with reaction {emote} because {reason}", messageId, emote, addReactionsResult.Error);

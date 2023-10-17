@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Remora.Discord.API.Abstractions.Objects;
@@ -14,14 +15,17 @@ namespace DiscordBoostRoleBot
     {
         private readonly ILogger<RolesRemoveService> _logger;
         private readonly IDiscordRestGuildAPI _guildApi;
+        private readonly IConfiguration _config;
 
-        public RolesRemoveService(ILogger<RolesRemoveService> logger, IDiscordRestGuildAPI guildApi)
+        public RolesRemoveService(ILogger<RolesRemoveService> logger, IDiscordRestGuildAPI guildApi, IConfiguration config)
         {
-            _logger = logger;
-            _guildApi = guildApi;
+            _logger      = logger;
+            _guildApi    = guildApi;
+            _config = config;
+            _executeInterval = TimeSpan.FromMinutes(_config.GetValue("RemoveRoleIntervalMinutes", 5));
         }
 
-        private readonly TimeSpan _executeInterval = TimeSpan.FromMinutes(Program.Config.RemoveRoleIntervalMinutes.HasValue ? Program.Config.RemoveRoleIntervalMinutes.Value : 5);
+        private readonly TimeSpan _executeInterval;
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!Program.IsInitialized())
@@ -35,7 +39,8 @@ namespace DiscordBoostRoleBot
                 await using Database.DiscordDbContext database = new();
                 List<Snowflake> guildIds = await database.RolesCreated
 #if DEBUG
-                    .Where(rc=> Program.Config.TestServerId == null || rc.ServerId == Program.Config.TestServerId)
+                    // .Where(rc=> Program.Config.TestServerId == null || rc.ServerId == Program.Config.TestServerId) but with _config
+                    .Where(rc=> _config.GetValue<ulong?>("TestServerId") == null || rc.ServerId == _config.GetValue<ulong>("TestServerId"))
 #endif
                     .Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
