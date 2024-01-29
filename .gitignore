@@ -19,3 +19,4 @@ DiscordBoostRoleBot.service
 *.tar
 /DockerCopyToServer.ps1
 /secrets.env
+/discord-boost-role-bot.container
