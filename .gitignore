@@ -18,3 +18,4 @@ DiscordBoostRoleBot.service
 /Logs
 *.tar
 /DockerCopyToServer.ps1
+/secrets.env

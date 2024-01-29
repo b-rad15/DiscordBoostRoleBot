@@ -53,6 +53,15 @@ namespace DiscordBoostRoleBot
         {
             //Build the service
             IHost? host = Host.CreateDefaultBuilder(args)
+                              .ConfigureAppConfiguration((hostingContext, config) =>
+                              {
+                                    config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                                            .AddJsonFile($"appsettings.{hostingContext.HostingEnvironment.EnvironmentName}.json",
+                                                                                                       optional: true, reloadOnChange: true)
+                                            .AddJsonFile("secrets.json", optional: true, reloadOnChange: true)
+                                            .AddEnvironmentVariables()
+                                            .AddCommandLine(args);
+                              })  
                               .AddDiscordService(services =>
                                   services.GetRequiredService<IConfiguration>().GetValue<string>("Token")!)
                               .ConfigureServices(
@@ -132,7 +141,7 @@ namespace DiscordBoostRoleBot
             }
             else
             {
-                log.LogInformation($"Successfully created commands {(debugServer is not null ? "on " + debugServer.Value : "global")}");
+                log.LogInformation("Successfully created commands {debugServerType}", debugServer is not null ? "on " + debugServer.Value : "global");
             }
             await host.RunAsync().ConfigureAwait(false);
 

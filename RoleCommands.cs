@@ -478,7 +478,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
             }
 
-            string msg = "";
+            var msg = string.Empty;
             Result<IReadOnlyList<IRole>> getRolesResult = await _restGuildApi.GetGuildRolesAsync(executionGuild.ID.Value, ct: this.CancellationToken).ConfigureAwait(false);
             if (getRolesResult.IsSuccess)
             {
@@ -503,7 +503,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                                 new (Snowflake RoleID, Optional<int?> Position)[] { (role.ID, maxPos) }).ConfigureAwait(false);
                         if (!roleMovePositionResult.IsSuccess)
                         {
-                            _log.LogWarning($"Could not move the role because {roleMovePositionResult.Error}");
+                            _log.LogWarning("Could not move the role because {error}", roleMovePositionResult.Error);
                             errResponse = await _feedbackService
                                 .SendContextualErrorAsync(
                                     "Could not move role in list, check the bot's permissions and try again",
@@ -516,23 +516,24 @@ Note: All users with server role change permissions and boosters are allowed to 
                             }
                         }
 
-                        _log.LogDebug(roleMovePositionResult.ToString()); 
+                        IRole thisRoleData = roleMovePositionResult.Entity.Single();
+                        _log.LogDebug("Role {role_name} moved to position {position}", thisRoleData.Name, thisRoleData.Position);
                     }
                     else
                     {
-                        _log.LogWarning($"Could not get bot member because {currentBotMemberResult.Error}");
+                        _log.LogWarning("Could not get bot member because {error}", currentBotMemberResult.Error);
                         msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                     }
                 }
                 else
                 {
-                    _log.LogWarning($"Could not get bot user because {currentBotUserResult.Error}");
+                    _log.LogWarning("Could not get bot user because {error}", currentBotUserResult.Error);
                     msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
                 }
             }
             else
             {
-                _log.LogWarning($"Could not move the role because {getRolesResult.Error}");
+                _log.LogWarning("Could not move the role because {error}", getRolesResult.Error);
                 msg += "Could not move role in list, check the bot's permissions (and role position) and try again or move the role manually\n";
             }
 
@@ -566,7 +567,8 @@ Note: All users with server role change permissions and boosters are allowed to 
                 imgData = await Program.httpClient
                     .GetByteArrayAsync(requestUri: imageUrl, cancellationToken: ct)
                     .ConfigureAwait(false);
-                imageFormat = Image.DetectFormat(data: imgData);
+                MemoryStream imageStream = new(imgData);
+                imageFormat = await Image.DetectFormatAsync(imageStream, ct);
                 
                 if (imageFormat is not JpegFormat && imageFormat is not PngFormat && imageFormat is not GifFormat)
                 {
