@@ -1,0 +1,12 @@
+configMapGenerator:
+  - name: boost-role-bot-config
+    files:
+    - appsettings.json
+    - secrets.json
+namespace: default
+resources:
+  - boost-role-bot-deployment.yaml
+commonLabels:
+  app.kubernetes.io/component: bot
+  app.kubernetes.io/part-of: boost-role
+  app.kubernetes.io/managed-by: kustomize
