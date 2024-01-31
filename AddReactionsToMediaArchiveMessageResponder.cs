@@ -1,19 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Linq;
-using System.Numerics;
+﻿using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using Humanizer;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.VisualBasic;
 using Remora.Commands.Attributes;
 using Remora.Commands.Groups;
 using Remora.Discord.API.Abstractions.Gateway.Events;
@@ -25,14 +15,10 @@ using Remora.Discord.Commands.Conditions;
 using Remora.Discord.Commands.Contexts;
 using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Feedback.Services;
-using Remora.Discord.Extensions.Embeds;
 using Remora.Discord.Gateway.Responders;
 using Remora.Rest.Core;
 using Remora.Rest.Results;
 using Remora.Results;
-using SixLabors.ImageSharp;
-using Z.EntityFramework.Plus;
-using Color = System.Drawing.Color;
 
 [assembly: InternalsVisibleTo("DiscordBotTests")]
 namespace DiscordBoostRoleBot
@@ -42,12 +28,15 @@ namespace DiscordBoostRoleBot
         private readonly IDiscordRestChannelAPI                              _channelApi;
         private readonly ILogger<AddReactionsToMediaArchiveMessageResponder> _logger;
         private readonly IConfiguration                                      _config;
+        private readonly Database                                            _database;
 
-        public AddReactionsToMediaArchiveMessageResponder(IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveMessageResponder> logger, IConfiguration config)
+
+        public AddReactionsToMediaArchiveMessageResponder(IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveMessageResponder> logger, IConfiguration config, Database database)
         {
             _channelApi  = channelApi;
             _logger      = logger;
-            _config = config;
+            _config      = config;
+            _database = database;
         }
 
         public async Task<Result> RespondAsync(IMessageCreate gatewayEvent, CancellationToken ct = new())
@@ -57,20 +46,19 @@ namespace DiscordBoostRoleBot
                 _logger.LogDebug("No server was in event, skipping");
                 return Result.FromSuccess();
             }
-            ulong serverId = gatewayEvent.GuildID.Value.Value;
-            ulong userId = gatewayEvent.Author.ID.Value;
+            Snowflake serverId  = gatewayEvent.GuildID.Value;
+            Snowflake userId    = gatewayEvent.Author.ID;
             Snowflake messageId = gatewayEvent.ID;
             Snowflake channelId = gatewayEvent.ChannelID;
 #if DEBUG
-            if (_config.GetValue<ulong?>("TestServerId") is not null && _config.GetValue<ulong>("TestServerId") != serverId)
+            Snowflake? testServer = _config.GetValue<Snowflake?>("TestServerId");
+            if (testServer is not null && testServer != serverId)
             {
                 _logger.LogDebug("{server} is not the debug server, skipping", serverId);
                 return Result.FromSuccess();
             }
 #endif
-            await using Database.DiscordDbContext database = new();
-            Database.MessageReactorSettings? dbItem = await database.MessageReactorSettings.Where(
-                mrs => mrs.ServerId == serverId && mrs.UserIds == userId).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
+            Database.MessageReactorSettings? dbItem = await _database.GetMessageReactorSettings(serverId,userId: userId).ConfigureAwait(false);
             if (dbItem is null)
             {
                 return Result.FromSuccess();
@@ -115,22 +103,23 @@ namespace DiscordBoostRoleBot
 
     internal class AddReactionsToMediaArchiveCommands : CommandGroup
     {
-
-        private readonly ICommandContext _context;
-        private readonly FeedbackService _feedbackService;
-        private readonly IDiscordRestChannelAPI _channelApi;
-        private readonly IDiscordRestGuildAPI _guildApi;
-        private readonly IDiscordRestInteractionAPI _interactionApi;
+        private readonly ICommandContext                             _context;
+        private readonly FeedbackService                             _feedbackService;
+        private readonly IDiscordRestChannelAPI                      _channelApi;
+        private readonly IDiscordRestGuildAPI                        _guildApi;
+        private readonly IDiscordRestInteractionAPI                  _interactionApi;
         private readonly ILogger<AddReactionsToMediaArchiveCommands> _logger;
+        private readonly Database                   database;
 
-        public AddReactionsToMediaArchiveCommands(ICommandContext context, FeedbackService feedbackService, IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveCommands> logger, IDiscordRestGuildAPI guildApi, IDiscordRestInteractionAPI interactionApi)
+        public AddReactionsToMediaArchiveCommands(ICommandContext context, FeedbackService feedbackService, IDiscordRestChannelAPI channelApi, ILogger<AddReactionsToMediaArchiveCommands> logger, IDiscordRestGuildAPI guildApi, IDiscordRestInteractionAPI interactionApi, Database database)
         {
-            _context = context;
+            _context         = context;
             _feedbackService = feedbackService;
-            _channelApi = channelApi;
-            _logger = logger;
-            _guildApi = guildApi;
-            _interactionApi = interactionApi;
+            _channelApi      = channelApi;
+            _logger          = logger;
+            _guildApi        = guildApi;
+            _interactionApi  = interactionApi;
+            this.database    = database;
         }
 
         [Command("react-settings")]
@@ -221,9 +210,9 @@ namespace DiscordBoostRoleBot
                 }
             }
 
-            await using Database.DiscordDbContext database = new();
+            // await using Database.DiscordDbContext database = new();
             Database.MessageReactorSettings? serverSettings = await 
-                database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+                database.GetMessageReactorSettings(executionGuild.ID.Value).ConfigureAwait(false);
             var newEntry = false;
             //TODO: Test emotes can be reacted before doing it
             if (serverSettings == null)
@@ -253,12 +242,11 @@ namespace DiscordBoostRoleBot
                 newEntry = true;
                 serverSettings = new Database.MessageReactorSettings
                 {
-                    ServerId = executionGuild.ID.Value.Value,
+                    ServerId = executionGuild.ID.Value,
                     Emotes = emotesString,
-                    UserIds = user.User.Value.ID.Value,
-                    ChannelId = channel.ID.Value
+                    UserIds = user.User.Value.ID,
+                    ChannelId = channel.ID
                 };
-                database.Add(serverSettings);
                 //TODO: check was added correctly
             }
             else
@@ -271,20 +259,19 @@ namespace DiscordBoostRoleBot
 
                 if (channel is not null)
                 {
-                    serverSettings.ChannelId = channel.ID.Value;
+                    serverSettings.ChannelId = channel.ID;
                     responseMessage += $"Added channel {channel.Mention()}\n";
                 }
 
                 if (user is not null)
                 {
-                    serverSettings.UserIds = user.User.Value.ID.Value;
+                    serverSettings.UserIds = user.User.Value.ID;
                     responseMessage += $"Added user {user}\n";
                 }
 
-                // Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualSuccessAsync(msg.TrimEnd());
             }
-            await database.SaveChangesAsync().ConfigureAwait(false);
-            responseMessage += $"Reacting to {new Snowflake(serverSettings.UserIds).User()} messages in {new Snowflake(serverSettings.ChannelId).Channel()} with {serverSettings.Emotes}";
+            await database.UpdateMessageReactorSettings(serverSettings).ConfigureAwait(false);
+            responseMessage += $"Reacting to {serverSettings.UserIds.User()} messages in {serverSettings.ChannelId.Channel()} with {serverSettings.Emotes}";
             Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualSuccessAsync(responseMessage).ConfigureAwait(false);
             if (replyResult.IsSuccess)
             {
@@ -422,9 +409,9 @@ namespace DiscordBoostRoleBot
                 TextCommandContext messageContext => messageContext.GuildID,
                 _ => throw new ArgumentOutOfRangeException(nameof(_context), _context, null),
             });
-            await using Database.DiscordDbContext database = new();
+            // await using Database.DiscordDbContext database = new();
             Database.MessageReactorSettings? serverSettings = await
-                database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
+                database.GetMessageReactorSettings(executionGuild.ID.Value).ConfigureAwait(false);
             Result<IReadOnlyList<IMessage>> respondResult;
             if (serverSettings is null)
             {
@@ -451,9 +438,9 @@ namespace DiscordBoostRoleBot
                 return Result.FromError(respondResult);
             }
 
-            serverSettings.UserIds = message.Author.Value.ID.Value;
-            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
-            respondResult = await _feedbackService.SendContextualSuccessAsync($"Set user to {new Snowflake(serverSettings.UserIds).User()}", options: new FeedbackMessageOptions
+            serverSettings.UserIds = message.Author.Value.ID;
+            await database.UpdateMessageReactorSettings(serverSettings).ConfigureAwait(false);
+            respondResult = await _feedbackService.SendContextualSuccessAsync($"Set user to {serverSettings.UserIds.User()}", options: new FeedbackMessageOptions
             {
                 MessageFlags = MessageFlags.Ephemeral
             }).ConfigureAwait(false);
@@ -538,11 +525,9 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(result: errResponse);
             }
-            await using Database.DiscordDbContext database = new();
             if (emotesString is null)
             {
-                emotesString = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value).Select(mrs => mrs.Emotes)
-                                             .FirstOrDefaultAsync().ConfigureAwait(false);
+                emotesString = await database.GetEmoteString(executionGuild.ID.Value).ConfigureAwait(false);
                 if (emotesString is null)
                 {
                     Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(
@@ -610,10 +595,9 @@ namespace DiscordBoostRoleBot
                     ? Result.FromSuccess()
                     : Result.FromError(result: errResponse);
             }
-            await using Database.DiscordDbContext database = new();
+            // await using Database.DiscordDbContext database = new();
             PartialGuild                                executionGuild = new(interactionContext.Interaction.GuildID);
-            Database.MessageReactorSettings? dbItem = await database.MessageReactorSettings.Where(mrs => mrs.ServerId == executionGuild.ID.Value.Value)
-                                                                    .FirstOrDefaultAsync().ConfigureAwait(false);
+            Database.MessageReactorSettings? dbItem = await database.GetMessageReactorSettings(executionGuild.ID.Value).ConfigureAwait(false);
             if (dbItem is null)
             {
                 Result<IReadOnlyList<IMessage>> replyResult = await _feedbackService.SendContextualErrorAsync(

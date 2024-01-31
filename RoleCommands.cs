@@ -1,5 +1,4 @@
 ﻿using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -16,12 +15,8 @@ using Remora.Discord.Commands.Conditions;
 using Remora.Rest.Core;
 using Remora.Results;
 using System.Reflection;
-using System.Windows.Input;
-using Microsoft.EntityFrameworkCore;
 using Remora.Discord.API.Objects;
-using Remora.Discord.Commands.Responders;
 using Remora.Discord.Commands.Results;
-using Remora.Rest.Results;
 using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -33,12 +28,15 @@ namespace DiscordBoostRoleBot
 {
     public class RoleCommands : CommandGroup
     {
-        private readonly FeedbackService _feedbackService;
-        private readonly ICommandContext _context;
-        private static IDiscordRestGuildAPI _restGuildApi;
-        private readonly IDiscordRestUserAPI _restUserApi;
-        private static IDiscordRestChannelAPI _restChannelApi;
-        private static ILogger<RoleCommands> _log;
+        private readonly FeedbackService           _feedbackService;
+        private readonly ICommandContext           _context;
+        private static   IDiscordRestGuildAPI      _restGuildApi;
+        private readonly IDiscordRestUserAPI       _restUserApi;
+        private static   IDiscordRestChannelAPI    _restChannelApi;
+        private static   ILogger<RoleCommands>     _log;
+        private readonly Database                  _database;
+
+
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RoleCommands"/> class.
@@ -49,14 +47,15 @@ namespace DiscordBoostRoleBot
         /// <param name="log">The logger used</param>
         /// <param name="restUserApi">Access to the User rest API</param>
         /// <param name="restChannelApi">Access to the Channel rest API</param>
-        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<RoleCommands> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi)
+        public RoleCommands(FeedbackService feedbackService, ICommandContext context, IDiscordRestGuildAPI restGuildApi, ILogger<RoleCommands> log, IDiscordRestUserAPI restUserApi, IDiscordRestChannelAPI restChannelApi, Database database)
         {
-            _feedbackService = feedbackService;
-            _context = context;
-            _restGuildApi = restGuildApi;
-            _log = log;
-            _restUserApi = restUserApi;
-            _restChannelApi = restChannelApi;
+            _feedbackService    = feedbackService;
+            _context            = context;
+            _restGuildApi       = restGuildApi;
+            _log                = log;
+            _restUserApi        = restUserApi;
+            _restChannelApi     = restChannelApi;
+            _database = database;
         }
 
         public static Color GetColorFromString(string colorString) => ColorTranslator.FromHtml(colorString);
@@ -116,28 +115,13 @@ namespace DiscordBoostRoleBot
                 _ => throw new ArgumentOutOfRangeException(nameof(_context)),
             });
             Result<IReadOnlyList<IMessage>> response;
-            await using Database.DiscordDbContext database = new();
-            Database.ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
-            if (serverSettings == null)
+            var addRoleResult = await _database.AddAllowedRole(executionGuild.ID.Value, roleToAdd.ID).ConfigureAwait(false);
+            if (!addRoleResult.IsSuccess)
             {
-                serverSettings = new()
-                {
-                    AllowedRolesSnowflakes = new(){roleToAdd.ID},
-                    ServerId = executionGuild.ID.Value.Value
-                };
-                database.Add(serverSettings);
-            } else
-            {
-                if (serverSettings.AllowedRolesSnowflakes.Contains(roleToAdd.ID))
-                {
-                    response = await _feedbackService.SendContextualInfoAsync(
-                        $"Role {roleToAdd.Mention()} is already allowed to make custom roles");
-                    return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
-                }
-
-                serverSettings.AllowedRolesSnowflakes.Add(roleToAdd.ID);
+                response = await _feedbackService.SendContextualInfoAsync(
+                    $"Role {roleToAdd.Mention()} was unable to be added to the database, contact the developer");
+                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
             }
-            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
             response = await _feedbackService.SendContextualInfoAsync(
                 $"Role {roleToAdd.Mention()} is now allowed to make custom roles");
             return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
@@ -163,22 +147,7 @@ namespace DiscordBoostRoleBot
             });
             Result<IReadOnlyList<IMessage>> response;
             var removeWarning = "(Note: mods, role admins, and boosters are still allowed, use slash command permissions to ban users/roles)";
-            await using Database.DiscordDbContext database = new();
-            Database.ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == executionGuild.ID.Value.Value).FirstOrDefaultAsync().ConfigureAwait(false);
-            if (serverSettings == null || serverSettings.AllowedRolesSnowflakes.Count == 0)
-            {
-                response = await _feedbackService.SendContextualInfoAsync(
-                    $"No specific roles are setup to allow role creation, only mods, admins, and boosters");
-                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
-            }
-            if (!serverSettings.AllowedRolesSnowflakes.Contains(roleToRemove.ID))
-            {
-                response = await _feedbackService.SendContextualInfoAsync(
-                    $"Role {roleToRemove.Mention()} was not allowed to make custom roles, no change made {removeWarning}");
-                return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
-            }
-            serverSettings.AllowedRolesSnowflakes.Remove(roleToRemove.ID);
-            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
+            var numModified = await _database.RemoveAllowedRole(executionGuild.ID.Value, roleToRemove.ID).ConfigureAwait(false);
             response = await _feedbackService.SendContextualInfoAsync(
                 $"Role {roleToRemove.Mention()} is now not allowed to make custom roles {removeWarning}");
             return response.IsSuccess ? Result.FromSuccess() : Result.FromError(response);
@@ -196,9 +165,8 @@ namespace DiscordBoostRoleBot
                 TextCommandContext messageContext     => messageContext.GuildID.Value,
                 _                                     => throw new ArgumentOutOfRangeException(nameof(_context)),
             });
-            await using Database.DiscordDbContext database = new();
-            List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == executionGuild.ID.Value.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
-            if (allowedRolesSnowflakes == null || allowedRolesSnowflakes.Count == 0)
+            List<Snowflake> allowedRolesSnowflakes = await _database.GetAllowedRoles(executionGuild.ID.Value);
+            if (allowedRolesSnowflakes is not { Count: > 0 })
             {
                 response = await _feedbackService.SendContextualInfoAsync(
                     $"No specific roles are setup to allow role creation, only mods, admins, and boosters");
@@ -326,8 +294,8 @@ Note: All users with server role change permissions and boosters are allowed to 
                 if (assign_to_member.IsNotBoosting())
                 {
                     //Not Boosting, check if has allowed role
-                    await using Database.DiscordDbContext database = new();
-                    List<Snowflake>? allowedRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == executionGuild.ID.Value.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
+                    // await using Database.DiscordDbContext database = new();
+                    List<Snowflake> allowedRolesSnowflakes = await _database.GetAllowedRoles(executionGuild.ID.Value).ConfigureAwait(false);
                     bool hasAllowedRole = false;
                     if (allowedRolesSnowflakes != null)
                     {
@@ -348,7 +316,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
             }
             //Check if you are not a mod and have more than one role
-            if (!executorGuildMember.IsRoleModAdminOrOwner() && 0 < await Database.GetRoleCount(executionGuild.ID.Value.Value, assign_to_member.User.Value.ID.Value).ConfigureAwait(false))
+            if (!executorGuildMember.IsRoleModAdminOrOwner() && 0 < await _database.GetRoleCount(executionGuild.ID.Value, assign_to_member.User.Value.ID).ConfigureAwait(false))
             {
                 return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
             }
@@ -433,7 +401,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 (iconStream, iconFormat) = imageToStreamResult.Entity;
             }
 
-            Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: requestServer, name: role_name, colour: roleColor, icon: iconStream ?? default(Optional<Stream>),
+            Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: requestServer, name: role_name, colour: roleColor, icon: iconStream ?? default,
                 isHoisted: false, isMentionable: true, ct: this.CancellationToken).ConfigureAwait(false);
             if (!roleResult.IsSuccess)
             {
@@ -448,8 +416,8 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
             }
             IRole role = roleResult.Entity;
-            bool addedToDb = await Database.AddRoleToDatabase(executionGuild.ID.Value.Value, assign_to_member.User.Value.ID.Value,
-                role.ID.Value, color: color, name: role.Name, imageUrl: image_url, role.Icon.HasValue ? role.Icon.Value?.Value : null).ConfigureAwait(false);
+            bool addedToDb = await _database.AddRoleToDatabase(executionGuild.ID.Value, assign_to_member.User.Value.ID,
+                role.ID, color: color, name: role.Name, imageUrl: image_url, role.Icon.HasValue ? role.Icon.Value?.Value : null).ConfigureAwait(false);
             if (!addedToDb)
             {
                 _log.LogError($"Could not add role to database");
@@ -516,7 +484,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                             }
                         }
 
-                        IRole thisRoleData = roleMovePositionResult.Entity.Single();
+                        IRole thisRoleData = roleMovePositionResult.Entity.Single(r => r.ID == role.ID);
                         _log.LogDebug("Role {role_name} moved to position {position}", thisRoleData.Name, thisRoleData.Position);
                     }
                     else
@@ -680,9 +648,8 @@ Note: All users with server role change permissions and boosters are allowed to 
             }
             //Run input checks
             //If you are (not the user you're trying to assign to or are not premium) and you are not a mod/owner then deny you
-            await using Database.DiscordDbContext database = new();
-            Database.RoleData? roleCreated = await database.RolesCreated.Where(rc =>
-                rc.ServerId == executionGuild.ID.Value.Value && rc.RoleId == role.ID.Value).FirstOrDefaultAsync();
+            List<Database.RoleData> rolesCreated = await _database.GetRoles(executionGuild.ID.Value, roleId: role.ID).ConfigureAwait(false);
+            Database.RoleData? roleCreated = rolesCreated.FirstOrDefault();
             if (roleCreated is null)
             {
                 replyResult = await _feedbackService.SendContextualErrorAsync(
@@ -693,16 +660,12 @@ Note: All users with server role change permissions and boosters are allowed to 
                     : Result.FromSuccess();
             }
 
-            // if (roleCreated.RoleUserId.IsOwner() && !_context.User.IsOwner())
-            // {
-            //     _log.LogCritical("{executeUser} tried to remove role {role} for user {roleUser} in server {server}", _context.User.Mention(), role.Mention(), new Snowflake(roleCreated.RoleUserId).User(), executionGuild.ID.Value.Value);
-            //     return await SendErrorReply("You really gonna do that?");
-            // }
             if (roleCreated.RoleUserId != executingMember.User.Value.ID.Value && !executingMember.IsRoleModAdminOrOwner())
             {
                 return await SendErrorReply("You do not have permission to untrack this role, you either you did not create it or do not have it and you don't have the mod permissions to manage roles").ConfigureAwait(false);
             }
-            (int result, ulong ownerId) = await Database.RemoveRoleFromDatabase(role).ConfigureAwait(false);
+            var ownerId = roleCreated.RoleUserId;
+            var result = await _database.RemoveRoleFromDatabase(executionGuild.ID.Value, role).ConfigureAwait(false);
             string replyMessageText = "";
             switch (result)
             {
@@ -735,13 +698,16 @@ Note: All users with server role change permissions and boosters are allowed to 
                         ct: this.CancellationToken).ConfigureAwait(false);
                     if (!replyResult.IsSuccess)
                         return Result.FromError(replyResult);
-                    if (!delete_role) 
-                        return Result.FromSuccess();
-                    Result removeRoleResult = await _restGuildApi.RemoveGuildMemberRoleAsync(executionGuild.ID.Value, new Snowflake(ownerId), role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken).ConfigureAwait(false);
-                    if (!removeRoleResult.IsSuccess)
+                    if (!delete_role)
                     {
-                        _log.LogError("Could not remove role {role} : {roleMention} from member {memberId} because {error}", role.Name,
-                            role.Mention(), ownerId, removeRoleResult.Error);
+                        // Role wont be deleted, remove from user
+                        Result removeRoleResult = await _restGuildApi.RemoveGuildMemberRoleAsync(executionGuild.ID.Value, ownerId, role.ID, reason: "Removing role to prep for deletion", ct: this.CancellationToken).ConfigureAwait(false);
+                        if (!removeRoleResult.IsSuccess)
+                        {
+                            _log.LogError("Could not remove role {role} : {roleMention} from member {memberId} because {error}", 
+                                role.Name, role.Mention(), ownerId.User(), removeRoleResult.Error);
+                        }
+                        return Result.FromSuccess();
                     }
                     Result deleteResult = await _restGuildApi.DeleteGuildRoleAsync(executionGuild.ID.Value, role.ID, reason: $"User requested deletion", ct: this.CancellationToken).ConfigureAwait(false);
                     if (!deleteResult.IsSuccess)
@@ -776,8 +742,7 @@ Note: All users with server role change permissions and boosters are allowed to 
         public async Task<IResult> TrackRole([Description("The role to track")] IRole role,
             [Description("If this role has no members, assign it to this user")] IUser? new_owner = null)
         {
-            await using Database.DiscordDbContext database = new();
-            if (await database.RolesCreated.Where(rd => rd.RoleId == role.ID.Value).AnyAsync().ConfigureAwait(false))
+            if ((await _database.GetRoles(roleId: role.ID)) is not { Count: 0 })
             {
                 return await SendErrorReply("This role is already being tracked").ConfigureAwait(false);
             }
@@ -830,7 +795,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             //Boosters are not allowed this perm due to the off chance 1 boosting member claims a (non-booster) role where they 
             if (!executorGuildMember.IsRoleModAdminOrOwner())
             {
-                if (await Database.GetRoleCount(executionGuild.ID.Value.Value, executorGuildMember.User.Value.ID.Value).ConfigureAwait(false) > 0 && !executorGuildMember.IsRoleModAdminOrOwner())
+                if (await _database.GetRoleCount(executionGuild.ID.Value, executorGuildMember.User.Value.ID).ConfigureAwait(false) > 0 && !executorGuildMember.IsRoleModAdminOrOwner())
                 {
                     return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
                 }
@@ -896,12 +861,11 @@ Note: All users with server role change permissions and boosters are allowed to 
             {
                 Color = ColorTranslator.ToHtml(role.Colour),
                 Name = role.Name,
-                RoleId = role.ID.Value,
-                ServerId = executionGuild.ID.Value.Value,
-                RoleUserId = ownerMemberSnowflake.Value
+                RoleId = role.ID,
+                ServerId = executionGuild.ID.Value,
+                RoleUserId = ownerMemberSnowflake,
             };
-            database.RolesCreated.Add(roleData);
-            await database.SaveChangesAsync().ConfigureAwait(false);
+            await _database.AddRoleToDatabase(roleData);
             return await SendSuccessReply($"Successfully started tracking {role.Mention()}, you can now modify it via bot commands").ConfigureAwait(false);
         }
 
@@ -970,9 +934,8 @@ Note: All users with server role change permissions and boosters are allowed to 
                         : Result.FromError(result: errResponse);
                 }
             }
-            await using Database.DiscordDbContext database = new();
-            Database.RoleData? roleData = await database.RolesCreated
-                .Where(rd => executionGuild.ID.Value.Value == rd.ServerId && role.ID.Value == rd.RoleId).FirstOrDefaultAsync().ConfigureAwait(false);
+            List<Database.RoleData> roleDatas = await _database.GetRoles(guildId: executionGuild.ID.Value, roleId: role.ID).ConfigureAwait(false);
+            Database.RoleData? roleData = roleDatas.FirstOrDefault();
             if (roleData == null)
             {
                 errResponse = await _feedbackService.SendContextualErrorAsync("Role not found in database, check that this command is tracking it").ConfigureAwait(false); 
@@ -1119,7 +1082,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 }
             }
             //If we changed db items and didn't save to the db
-            if ((new_name is not null || new_color_string is not null) && await database.SaveChangesAsync().ConfigureAwait(false) < 1)
+            if ((new_name is not null || new_color_string is not null) && await _database.UpdateRoleInDatabase(roleData).ConfigureAwait(false) == 0)
             {
                 //TODO: Change role back or queue a later write to the database
                 errResponse = await _feedbackService.SendContextualErrorAsync(

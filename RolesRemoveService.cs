@@ -1,5 +1,4 @@
 ﻿using System.Runtime.CompilerServices;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -7,21 +6,23 @@ using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Rest.Core;
 using Remora.Results;
-using Z.EntityFramework.Plus;
 
 namespace DiscordBoostRoleBot
 {
     internal class RolesRemoveService : BackgroundService
     {
         private readonly ILogger<RolesRemoveService> _logger;
-        private readonly IDiscordRestGuildAPI _guildApi;
-        private readonly IConfiguration _config;
+        private readonly IDiscordRestGuildAPI        _guildApi;
+        private readonly IConfiguration              _config;
+        private readonly Database   database;
 
-        public RolesRemoveService(ILogger<RolesRemoveService> logger, IDiscordRestGuildAPI guildApi, IConfiguration config)
+
+        public RolesRemoveService(ILogger<RolesRemoveService> logger, IDiscordRestGuildAPI guildApi, IConfiguration config, Database database)
         {
-            _logger      = logger;
-            _guildApi    = guildApi;
-            _config = config;
+            _logger          = logger;
+            _guildApi        = guildApi;
+            _config          = config;
+            this.database    = database;
             _executeInterval = TimeSpan.FromMinutes(_config.GetValue("RemoveRoleIntervalMinutes", 5));
         }
 
@@ -36,13 +37,15 @@ namespace DiscordBoostRoleBot
             {
                 ConfiguredTaskAwaitable waitTimer = Task.Delay(_executeInterval, stoppingToken).ConfigureAwait(false);
                 _logger.LogInformation("{className} running at: {time}", GetType().Name, DateTimeOffset.Now);
-                await using Database.DiscordDbContext database = new();
-                List<Snowflake> guildIds = await database.RolesCreated
+                var roleDatas = await database.GetRoles();
 #if DEBUG
-                    // .Where(rc=> Program.Config.TestServerId == null || rc.ServerId == Program.Config.TestServerId) but with _config
-                    .Where(rc=> _config.GetValue<ulong?>("TestServerId") == null || rc.ServerId == _config.GetValue<ulong>("TestServerId"))
+                var testServerValue = _config.GetValue<ulong?>("TestServerId");
+                List<Snowflake> guildIds = testServerValue == null
+                    ? roleDatas.Select(rc => rc.ServerId).Distinct().ToList()
+                    : [new(testServerValue.Value, 0)];
+#else 
+                List<Snowflake> guildIds = roleDatas.Select(rd => rd.ServerId).Distinct().ToList();
 #endif
-                    .Select(rc => new Snowflake(rc.ServerId, 0)).Distinct().ToListAsync(cancellationToken: stoppingToken).ConfigureAwait(false);
                 foreach (Snowflake guildId in guildIds)
                 {
                     var guildInfoResult = await _guildApi.GetGuildPreviewAsync(guildId, ct: stoppingToken).ConfigureAwait(false);
@@ -74,8 +77,7 @@ namespace DiscordBoostRoleBot
                     }
                     foreach (IGuildMember userRemoved in usersRemoved)
                     {
-                        // Already deleted on removal
-                        // await database.RolesCreated.Where(rc => rc.RoleUserId == userRemoved.Value).DeleteAsync(stoppingToken);
+                        // Already deleted from db on removal
                         _logger.LogInformation("\tRemoved user {userName} - {userMention}", userRemoved.User.Value.NameAndDiscriminator(), userRemoved.User.Value.Mention());
                     }
                 }

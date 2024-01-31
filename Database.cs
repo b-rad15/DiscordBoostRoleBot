@@ -1,140 +1,99 @@
-﻿using System.ComponentModel.DataAnnotations.Schema;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Console;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson;
+using MongoDB.Driver;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Rest.Core;
 using Remora.Results;
-using SQLitePCL;
-using Remora.Discord;
-using Serilog;
 
 namespace DiscordBoostRoleBot
 {
-    internal class Database
+    public class MongoDbSettings
     {
-        private readonly ILogger<Database> _logger;
+        public string ConnectionString { get; set; } = null!;
+        public string DatabaseName { get; set; } = null!;
+        public string RolesCollectionName { get; set; } = null!;
+        public string MessageReactorSettingsCollectionName { get; set; } = null!;
+        public string ServerSettingsCollectionName { get; set; } = null!;
+    }
+    public class Database
+    {
+        private readonly ILogger<Database>          _logger;
+        private readonly IMongoCollection<RoleData> _rolesCollection;
+        private readonly IMongoCollection<MessageReactorSettings> _messageReactorSettingsCollection;
+        private readonly IMongoCollection<ServerSettings> _serverSettingsCollection;
 
-        public Database(ILogger<Database> logger)
+        public Database(ILogger<Database> logger, IOptions<MongoDbSettings> mongoDbSettings)
         {
-            _logger = logger;
+            _logger       = logger;
+            var             client   = new MongoClient(mongoDbSettings.Value.ConnectionString);
+            IMongoDatabase? database = client.GetDatabase(mongoDbSettings.Value.DatabaseName);
+            // Check that roles collection exists, if not, create it
+            if (!database.ListCollectionNames().ToList().Contains(mongoDbSettings.Value.RolesCollectionName))
+            {
+                database.CreateCollection(mongoDbSettings.Value.RolesCollectionName);
 
+            }
+            _rolesCollection = database.GetCollection<RoleData>(mongoDbSettings.Value.RolesCollectionName);
+            // Check that RoleId is an index
+            var rolesCollectionIndexes = _rolesCollection.Indexes.List().ToList();
+            if (rolesCollectionIndexes.All(index => index["name"] != "role_id"))
+            {
+                _rolesCollection.Indexes.CreateOne(new CreateIndexModel<RoleData>(Builders<RoleData>.IndexKeys.Ascending(roleData => roleData.RoleId)));
+            }
+            // Check that message reactor settings collection exists, if not, create it
+            if (!database.ListCollectionNames().ToList()
+                         .Contains(mongoDbSettings.Value.MessageReactorSettingsCollectionName))
+            {
+                database.CreateCollection(mongoDbSettings.Value.MessageReactorSettingsCollectionName);
+            }
+            _messageReactorSettingsCollection = database.GetCollection<MessageReactorSettings>(mongoDbSettings.Value.MessageReactorSettingsCollectionName);
+            // Check that ServerId is an index
+            var messageReactorSettingsCollectionIndexes = _messageReactorSettingsCollection.Indexes.List().ToList();
+            if (messageReactorSettingsCollectionIndexes.All(index => index["name"] != "server_id"))
+            {
+                _messageReactorSettingsCollection.Indexes.CreateOne(new CreateIndexModel<MessageReactorSettings>(Builders<MessageReactorSettings>.IndexKeys.Ascending(messageReactorSettings => messageReactorSettings.ServerId)));
+            }
+            // Check that server settings collection exists, if not, create it
+            if (!database.ListCollectionNames().ToList()
+                         .Contains(mongoDbSettings.Value.ServerSettingsCollectionName))
+            {
+                database.CreateCollection(mongoDbSettings.Value.ServerSettingsCollectionName);
+            }
+            _serverSettingsCollection = database.GetCollection<ServerSettings>(mongoDbSettings.Value.ServerSettingsCollectionName);
+            // Check that ServerId is an index
+            var serverSettingsCollectionIndexes = _serverSettingsCollection.Indexes.List().ToList();
+            if (serverSettingsCollectionIndexes.All(index => index["name"] != "server_id"))
+            {
+                _serverSettingsCollection.Indexes.CreateOne(new CreateIndexModel<ServerSettings>(Builders<ServerSettings>.IndexKeys.Ascending(serverSettings => serverSettings.ServerId)));
+            }
         }
         public class RoleData
         {
-            public int EntryId { get; set; }
-            public ulong RoleId { get; set; }
-            public ulong ServerId { get; set; }
-            public ulong RoleUserId { get; set; }
-            public string Color { get; set; }
-            public string Name { get; set; }
-            public string? ImageUrl { get; set; }
-            public string? ImageHash { get; set; }
-        }
-        public class RoleDataEntityTypeConfiguration : IEntityTypeConfiguration<RoleData>
-        {
-            public void Configure(EntityTypeBuilder<RoleData> builder)
-            {
-                //Property Specific stuff
-                builder.Property(cl => cl.EntryId).IsRequired().ValueGeneratedOnAdd();
-                builder.Property(cl => cl.ServerId).IsRequired();
-                builder.Property(cl => cl.RoleId).IsRequired();
-                builder.Property(cl => cl.RoleUserId).IsRequired();
-                builder.Property(cl => cl.Color).IsRequired();
-                builder.Property(cl => cl.ImageUrl);
-                builder.Property(cl => cl.ImageHash);
-                //Table Stuff
-                builder.ToTable("Roles");
-                builder.HasKey(cl => cl.EntryId);
-            }
+            public Snowflake RoleId     { get; set; }
+            public Snowflake ServerId   { get; set; }
+            public Snowflake RoleUserId { get; set; }
+            public string    Color      { get; set; }
+            public string    Name       { get; set; }
+            public string?   ImageUrl   { get; set; }
+            public string?   ImageHash  { get; set; }
         }
         public class MessageReactorSettings
         {
-            public ulong ServerId;
-            public ulong ChannelId;
-            public ulong UserIds;
+            public Snowflake ServerId;
+            public Snowflake ChannelId;
+            public Snowflake UserIds;
             public string Emotes;
-        }
-        public class MessageReactorSettingsEntityTypeConfiguration : IEntityTypeConfiguration<MessageReactorSettings>
-        {
-            public void Configure(EntityTypeBuilder<MessageReactorSettings> builder)
-            {
-                //Property Specific stuff
-                builder.Property(cl => cl.ServerId).IsRequired();
-                builder.Property(cl => cl.UserIds).IsRequired();
-                builder.Property(cl => cl.Emotes).IsRequired();
-                builder.Property(cl => cl.ChannelId).IsRequired();
-                //Table Stuff
-                builder.ToTable("MessageReactorSettings");
-                builder.HasKey(cl => cl.ServerId);
-            }
         }
         public class ServerSettings
         {
-            public ulong ServerId;
+            public Snowflake ServerId;
             public string Prefix = "&";
             public List<Snowflake> AllowedRolesSnowflakes { get; set; } = null!;
         }
-        public class ServerSettingsEntityTypeConfiguration : IEntityTypeConfiguration<ServerSettings>
-        {
-            public void Configure(EntityTypeBuilder<ServerSettings> builder)
-            {
-                //Property Specific stuff
-                builder.Property(cl => cl.ServerId).IsRequired();
-                builder.Property(cl => cl.Prefix).IsRequired().HasDefaultValue("&");
-                builder.Property(cl => cl.AllowedRolesSnowflakes).IsRequired();
-                //Table Stuff
-                builder.ToTable("ServerSettings");
-                builder.HasKey(cl => cl.ServerId);
-            }
-        }
-        public class DiscordDbContext : DbContext
-        {
-            public DbSet<RoleData> RolesCreated { get; set; }
-            public DbSet<MessageReactorSettings> MessageReactorSettings { get; set; }
-            public DbSet<ServerSettings> ServerwideSettings { get; set; }
-
-            private readonly ILoggerFactory _loggerFactory = LoggerFactory.Create(builder=>builder.AddSerilog());
-
-            protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
-                optionsBuilder.UseSqlite("Data Source=RolesDatabase.db;")
-                    //https://learn.microsoft.com/en-us/ef/core/logging-events-diagnostics/extensions-logging?tabs=v3
-                    .UseLoggerFactory(_loggerFactory)
-                    .ConfigureWarnings(b=>b.Log(
-                        (RelationalEventId.ConnectionOpening, LogLevel.Trace),
-                        (RelationalEventId.ConnectionOpened, LogLevel.Trace),
-                        (RelationalEventId.CommandCreating, LogLevel.Trace),
-                        (CoreEventId.ContextInitialized, LogLevel.Trace),
-                        (RelationalEventId.CommandExecuted, LogLevel.Debug),
-                        (RelationalEventId.ConnectionClosed, LogLevel.Trace)))
-                    .EnableSensitiveDataLogging()
-                    .EnableDetailedErrors();
-
-            protected override void OnModelCreating(ModelBuilder modelBuilder)
-            {
-                modelBuilder.ApplyConfigurationsFromAssembly(typeof(RoleDataEntityTypeConfiguration).Assembly);
-                modelBuilder.ApplyConfigurationsFromAssembly(typeof(MessageReactorSettingsEntityTypeConfiguration).Assembly);
-                modelBuilder.ApplyConfigurationsFromAssembly(typeof(ServerSettingsEntityTypeConfiguration).Assembly);
-                const char separatorChar = '|';
-                var snowflakeListConverter = new ValueConverter<List<Snowflake>, string>(snowflakesList => string.Join(separatorChar, snowflakesList),
-                    snowflakesString => snowflakesString.Split(separatorChar, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(individualSnowflakeString => new Snowflake(Convert.ToUInt64(individualSnowflakeString), 0)).ToList());
-                var snowflakeListValueComparer = new ValueComparer<List<Snowflake>>(
-                    (c1, c2) => new HashSet<Snowflake>(c1!).SetEquals(new HashSet<Snowflake>(c2!)),
-                    c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
-                    c => c.ToList());
-                modelBuilder.Entity<ServerSettings>()
-                    .Property(nameof(ServerSettings.AllowedRolesSnowflakes))
-                    .HasConversion(snowflakeListConverter, snowflakeListValueComparer);
-            }
-
-        }
-        public static async Task<bool> AddRoleToDatabase(ulong serverId, ulong userId, ulong roleId, string color, string name, string? imageUrl = null, string? imageHash = null)
+        #region RolesDatabase
+        public async Task<bool> AddRoleToDatabase(Snowflake serverId, Snowflake userId, Snowflake roleId, string color, string name, string? imageUrl = null, string? imageHash = null)
         {
             RoleData roleData = new()
             {
@@ -146,59 +105,207 @@ namespace DiscordBoostRoleBot
                 ImageUrl = imageUrl,
                 ImageHash = imageHash
             };
-            await using DiscordDbContext database = new();
-            database.Add(roleData);
-            return await database.SaveChangesAsync().ConfigureAwait(false) > 0;
-        }
-        public static async Task<int> GetRoleCount(ulong serverId, ulong userId)
-        {
-            await using DiscordDbContext database = new();
-            var rolesCount = await database.RolesCreated.CountAsync(rd => rd.ServerId == serverId && rd.RoleUserId == userId).ConfigureAwait(false);
-            return rolesCount;
-        }
-        public static async Task<(int, ulong)> RemoveRoleFromDatabase(IRole role) => await RemoveRoleFromDatabase(role.ID).ConfigureAwait(false);
-        public static async Task<(int, ulong)> RemoveRoleFromDatabase(Snowflake roleSnowflake) => await RemoveRoleFromDatabase(roleSnowflake.Value).ConfigureAwait(false);
-        public static async Task<(int, ulong)> RemoveRoleFromDatabase(ulong roleId)
-        {
-            await using DiscordDbContext database = new();
-            RoleData? roleToRemove = await database.RolesCreated.Where(roleData => roleData.RoleId == roleId).FirstOrDefaultAsync().ConfigureAwait(false);
-            if (roleToRemove is null)
-            {
-                return (-1, 0);
-            }
-            database.RolesCreated.Remove(roleToRemove);
-            return (await database.SaveChangesAsync().ConfigureAwait(false), roleToRemove.RoleUserId);
+            return await AddRoleToDatabase(roleData);
         }
 
-        public static async Task<string> GetPrefix(Snowflake guildId) => await GetPrefix(guildId.Value).ConfigureAwait(false);
-        public static async Task<string> GetPrefix(ulong guildId, string? defaultPrefix = null)
+        public async Task<bool> AddRoleToDatabase(RoleData roleData)
         {
-            await using DiscordDbContext database = new();
-            string? prefix = await database.ServerwideSettings.Where(ss => ss.ServerId == guildId).Select(ss=>ss.Prefix).AsNoTracking().FirstOrDefaultAsync().ConfigureAwait(false);
-            return prefix ?? (defaultPrefix ?? PrefixSetter.DefaultPrefix);
+            await _rolesCollection.InsertOneAsync(roleData);
+            return true;
         }
-        public static async Task<Result> SetPrefix(Snowflake guildId, string prefix) => await SetPrefix(guildId.Value, prefix).ConfigureAwait(false);
-        public static async Task<Result> SetPrefix(ulong guildId, string prefix)
+        public async Task<long> UpdateRoleInDatabase(RoleData roleData)
         {
-            await using DiscordDbContext database = new();
-            ServerSettings? serverSettings = await database.ServerwideSettings.Where(ss => ss.ServerId == guildId).FirstOrDefaultAsync().ConfigureAwait(false);
-            if (serverSettings is null)
-            {
-                serverSettings = new()
-                {
-                    Prefix = prefix,
-                    ServerId = guildId
-                };
-                database.Add(serverSettings);
-            }
-            else
-            {
-                serverSettings.ServerId = guildId;
-            }
-            int numRows = await database.SaveChangesAsync().ConfigureAwait(false);
-            return numRows > 1 
-                ? Result.FromSuccess() 
-                : Result.FromError<string>($"Failed to save database, {numRows} rows updated");
+            var res = await _rolesCollection.ReplaceOneAsync(r => r.RoleId == roleData.RoleId, roleData);
+            return res.ModifiedCount;
         }
+        public async Task<long> GetRoleCount(Snowflake serverId, Snowflake userId)
+        {
+            FilterDefinitionBuilder<RoleData>? documentFilter = Builders<RoleData>.Filter;
+            FilterDefinition<RoleData>?        serverIdFilter = documentFilter.Eq(roleData => roleData.ServerId,   serverId);
+            FilterDefinition<RoleData>?        userIdFilter   = documentFilter.Eq(roleData => roleData.RoleUserId, userId);
+            FilterDefinition<RoleData>?        filter         = documentFilter.And(serverIdFilter, userIdFilter);
+            long                                count          = await _rolesCollection.CountDocumentsAsync(filter);
+            return count;
+        }
+
+        public async Task<List<RoleData>> GetRoles(Snowflake? guildId = null, Snowflake? userId = null, Snowflake? roleId = null)
+        {
+            FilterDefinitionBuilder<RoleData>? documentFilter = Builders<RoleData>.Filter;
+            FilterDefinition<RoleData>?        serverIdFilter = guildId.HasValue ? documentFilter.Eq(roleData => roleData.ServerId,  guildId.Value) : documentFilter.Empty;
+            FilterDefinition<RoleData>?        userIdFilter   = userId.HasValue ? documentFilter.Eq(roleData => roleData.RoleUserId, userId.Value) : documentFilter.Empty;
+            FilterDefinition<RoleData>?        roleIdFilter   = roleId.HasValue ? documentFilter.Eq(roleData => roleData.RoleId,     roleId.Value) : documentFilter.Empty;
+            FilterDefinition<RoleData>?        filter         = documentFilter.And(serverIdFilter, userIdFilter, roleIdFilter);
+            IFindFluent<RoleData, RoleData>    findFluent     = _rolesCollection.Find(filter);
+            // Render filter in a way to input into mongo shell
+            string filterString = filter.Render(BsonSerializer.SerializerRegistry.GetSerializer<RoleData>(), BsonSerializer.SerializerRegistry).ToJson();
+            _logger.LogDebug("Filter: {filter:l}", filterString.Replace(@"\""", @""""));
+            List<RoleData>?                    roles          = await findFluent.ToListAsync();
+            return roles;
+        }
+        public async Task<long> RemoveRoleFromDatabase(Snowflake guildId, IRole role) => await RemoveRoleFromDatabase(guildId, role.ID).ConfigureAwait(false);
+        public async Task<long> RemoveRoleFromDatabase(Snowflake guildId, Snowflake roleId)
+        {
+            FilterDefinitionBuilder<RoleData>? documentFilter = Builders<RoleData>.Filter;
+            FilterDefinition<RoleData>?        roleIdFilter   = documentFilter.Eq(roleData => roleData.RoleId, roleId);
+            FilterDefinition<RoleData>?        serverIdFilter = documentFilter.Eq(roleData => roleData.ServerId, guildId);
+            FilterDefinition<RoleData>?        filter         = documentFilter.And(serverIdFilter, roleIdFilter);
+            DeleteResult?                      deleteResult   = await _rolesCollection.DeleteOneAsync(filter);
+            if (deleteResult.DeletedCount == 0)
+            {
+                return -1;
+            }
+            return deleteResult.DeletedCount;
+        }
+        #endregion
+
+        #region ServerSettingsDatabase
+        public async Task<string> GetPrefix(Snowflake guildId, string? defaultPrefix = null)
+        {
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            // Grab only the prefix element
+            ProjectionDefinitionBuilder<ServerSettings>?  documentProjection = Builders<ServerSettings>.Projection;
+            ProjectionDefinition<ServerSettings, string>? projection         = documentProjection.Expression(serverSettings => serverSettings.Prefix);
+            string?                                           prefix             = await _serverSettingsCollection.Find(filter).Project(projection).FirstOrDefaultAsync();
+            // If prefix is null, set it to defaultPrefix, if defaultPrefix is null, set it to "&"
+            prefix ??= defaultPrefix ?? "&";
+            return prefix;
+
+        }
+        public async Task<Result> SetPrefix(Snowflake guildId, string prefix)
+        {
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            UpdateDefinition<ServerSettings>?        update         = Builders<ServerSettings>.Update.Set(serverSettings => serverSettings.Prefix, prefix);
+            UpdateResult?                                      updateResult   = await _serverSettingsCollection.UpdateOneAsync(filter, update);
+            switch (updateResult.ModifiedCount)
+            {
+                case 0:
+                    ServerSettings serverSettings = new()
+                    {
+                        Prefix = prefix,
+                        ServerId = guildId
+                    };
+                    await _serverSettingsCollection.InsertOneAsync(serverSettings);
+                    return Result.FromSuccess();
+                case 1:
+                    return Result.FromSuccess();
+                default:
+                    return new ArgumentOutOfRangeError(nameof(updateResult.ModifiedCount),$"Updated {updateResult.ModifiedCount} rows for server {guildId}. There should not be multiple rows with the same guildId");
+            }
+        }
+        public async Task<List<Snowflake>> GetAllowedRoles(Snowflake guildId)
+        {
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            // Grab only the allowed roles list
+            ProjectionDefinitionBuilder<ServerSettings>?           documentProjection = Builders<ServerSettings>.Projection;
+            ProjectionDefinition<ServerSettings, List<Snowflake>>? projection         = documentProjection.Expression(serverSettings => serverSettings.AllowedRolesSnowflakes);
+            List<Snowflake>?                                       allowedRoles       = await _serverSettingsCollection.Find(filter).Project(projection).FirstOrDefaultAsync();
+            // If prefix is null, set it to defaultPrefix, if defaultPrefix is null, set it to "&"
+            allowedRoles ??= [];
+            return allowedRoles;
+        }
+        public async Task<ServerSettings?> GetServerSettings(Snowflake guildId)
+        {
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            ServerSettings?                          serverSettings = await _serverSettingsCollection.Find(filter).FirstOrDefaultAsync();
+            return serverSettings;
+        }
+
+        //TODO: AddAllowedRole should specify if anything was added or if it was already there, would require a Result<bool> or int or something
+        public async Task<Result> AddAllowedRole(Snowflake guildId, Snowflake roleId)
+        {
+            // Add a role to the server's list of allowed roles if it isn't already there
+            // Upsert the server settings if they don't exist
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;  
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            UpdateDefinition<ServerSettings>?        update         = Builders<ServerSettings>.Update.AddToSet(serverSettings => serverSettings.AllowedRolesSnowflakes, roleId);
+            UpdateResult?                            updateResult   = await _serverSettingsCollection.UpdateOneAsync(filter, update, new(){ IsUpsert = true });
+            switch (updateResult.ModifiedCount)
+            {
+                case 0: // Server already had that role as allowed
+                    return Result.FromSuccess();
+                case 1: // Server didn't have that role as allowed, added
+                    return Result.FromSuccess();
+                default: // Shouldn't happen
+                    _logger.LogCritical("Updated {updateResult.ModifiedCount} rows for server {guildId}. There should not be multiple rows with the same guildId", updateResult.ModifiedCount, guildId);
+                    return new ArgumentOutOfRangeError(nameof(updateResult.ModifiedCount),$"Updated {updateResult.ModifiedCount} rows for server {guildId}. There should not be multiple rows with the same guildId");
+            }
+        }
+        public async Task<Result<short>> RemoveAllowedRole(Snowflake guildId, Snowflake roleId)
+        {
+            // Remove a role from the server's list of allowed roles if it is there
+            // Upsert the server settings if they don't exist
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;  
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            UpdateDefinition<ServerSettings>?        update         = Builders<ServerSettings>.Update.Pull(serverSettings => serverSettings.AllowedRolesSnowflakes, roleId);
+            UpdateResult?                            updateResult   = await _serverSettingsCollection.UpdateOneAsync(filter, update);
+            switch (updateResult.ModifiedCount)
+            {
+                case 0: // Server didn't have that role as allowed
+                    return 0;
+                case 1: // Server had that role as allowed, removed
+                    return 1;
+                default: // Shouldn't happen
+                    _logger.LogCritical("Updated {updateResult.ModifiedCount} rows for server {guildId}. There should not be multiple rows with the same guildId", updateResult.ModifiedCount, guildId);
+                    return new ArgumentOutOfRangeException(nameof(updateResult.ModifiedCount), updateResult.ModifiedCount, $"Updated {updateResult.ModifiedCount} rows for server {guildId}. There should not be multiple rows with the same guildId");
+            }
+        }
+
+        public async Task<Result<List<Snowflake>>> GetAllowedRoles(Snowflake guildId, List<Snowflake> roleIds)
+        {
+            FilterDefinitionBuilder<ServerSettings>? documentFilter = Builders<ServerSettings>.Filter;
+            FilterDefinition<ServerSettings>?        serverIdFilter = documentFilter.Eq(serverSettings => serverSettings.ServerId, guildId);
+            FilterDefinition<ServerSettings>?        filter         = serverIdFilter;
+            // Grab only the allowed roles list
+            ProjectionDefinitionBuilder<ServerSettings>?           documentProjection = Builders<ServerSettings>.Projection;
+            ProjectionDefinition<ServerSettings, List<Snowflake>>? projection         = documentProjection.Expression(serverSettings => serverSettings.AllowedRolesSnowflakes);
+            List<Snowflake>?                                       allowedRoles       = await _serverSettingsCollection.Find(filter).Project(projection).FirstOrDefaultAsync();
+            allowedRoles ??= [];
+            return allowedRoles;
+        }
+
+        #endregion
+
+        #region MessageRectorSettingsDatabase
+
+        public async Task<MessageReactorSettings?> GetMessageReactorSettings(Snowflake guildId, Snowflake? userId = null)
+        {
+            FilterDefinitionBuilder<MessageReactorSettings>? documentFilter = Builders<MessageReactorSettings>.Filter;
+            FilterDefinition<MessageReactorSettings>?        serverIdFilter = documentFilter.Eq(messageReactorSettings => messageReactorSettings.ServerId, guildId);
+            FilterDefinition<MessageReactorSettings>?        userIdFilter   = userId.HasValue ? documentFilter.Eq(messageReactorSettings => messageReactorSettings.UserIds, userId.Value) : documentFilter.Empty;
+            FilterDefinition<MessageReactorSettings>?        filter         = documentFilter.And(serverIdFilter, userIdFilter);
+            MessageReactorSettings?                          messageReactorSettings = await _messageReactorSettingsCollection.Find(filter).FirstOrDefaultAsync();
+            return messageReactorSettings;
+        }
+
+        public async Task<Result> UpdateMessageReactorSettings(
+            MessageReactorSettings messageReactorSettings)
+        {
+            //Replace with passed arg
+            ReplaceOneResult replaceResult = await _messageReactorSettingsCollection.ReplaceOneAsync(mrs => mrs.ServerId == messageReactorSettings.ServerId, messageReactorSettings, new ReplaceOptions{ IsUpsert = true });
+            return Result.FromSuccess();
+        }
+
+        public async Task<string?> GetEmoteString(Snowflake guildId)
+        {
+            var documentFilter = Builders<MessageReactorSettings>.Filter;
+            var serverIdFilter = documentFilter.Eq(messageReactorSettings => messageReactorSettings.ServerId, guildId);
+            var filter = serverIdFilter;
+            // Grab only the emote string
+            var documentProjection = Builders<MessageReactorSettings>.Projection;
+            var projection = documentProjection.Expression(messageReactorSettings => messageReactorSettings.Emotes);
+            string? emoteString = await _messageReactorSettingsCollection.Find(filter).Project(projection).FirstOrDefaultAsync();
+            return emoteString;
+        }
+        #endregion
     }
 }

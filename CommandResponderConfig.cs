@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.ComponentModel;
 using Microsoft.Extensions.Logging;
 using Remora.Commands.Attributes;
 using Remora.Commands.Groups;
@@ -25,16 +20,18 @@ namespace DiscordBoostRoleBot
     internal class CommandResponderConfigCommands : CommandGroup
     {
 
-        private readonly ICommandContext _context;
-        private readonly FeedbackService _feedbackService;
-        private readonly IDiscordRestGuildAPI _guildApi;
+        private readonly ICommandContext                         _context;
+        private readonly FeedbackService                         _feedbackService;
+        private readonly IDiscordRestGuildAPI                    _guildApi;
         private readonly ILogger<CommandResponderConfigCommands> _logger;
-        public CommandResponderConfigCommands(ICommandContext context, FeedbackService feedbackService, IDiscordRestGuildAPI guildApi, ILogger<CommandResponderConfigCommands> logger)
+        private readonly Database                                _databaseClass;
+        public CommandResponderConfigCommands(ICommandContext context, FeedbackService feedbackService, IDiscordRestGuildAPI guildApi, ILogger<CommandResponderConfigCommands> logger, Database databaseClass)
         {
-            _context = context;
-            _feedbackService = feedbackService;
-            _guildApi = guildApi;
-            _logger = logger;
+            _context            = context;
+            _feedbackService    = feedbackService;
+            _guildApi           = guildApi;
+            _logger             = logger;
+            _databaseClass = databaseClass;
         }
 
         [RequireContext(ChannelContext.Guild)]
@@ -115,13 +112,24 @@ namespace DiscordBoostRoleBot
                     : Result.FromError(errResponse);
             }
 
-            Result setPrefixResult = await Database.SetPrefix(executorGuild.ID.Value, prefix);
+            Result setPrefixResult = await _databaseClass.SetPrefix(executorGuild.ID.Value, prefix);
             if (!setPrefixResult.IsSuccess)
             {
-                errResponse = await _feedbackService.SendContextualErrorAsync("Failed to set prefix");
-                return errResponse.IsSuccess
-                    ? Result.FromSuccess()
-                    : Result.FromError(errResponse);
+                switch (setPrefixResult.Error)
+                {
+                    case ArgumentOutOfRangeError:
+                        _logger.LogCritical("Could not set prefix because {error}", setPrefixResult.Error);
+                        errResponse = await _feedbackService.SendContextualErrorAsync("Multiple server entries found, prefix likely will fail. Contact developer.");
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(errResponse);
+                    default:
+                        _logger.LogError("Could not set prefix because {error}", setPrefixResult.Error);
+                        errResponse = await _feedbackService.SendContextualErrorAsync("Could not set prefix, try again or contact developer");
+                        return errResponse.IsSuccess
+                            ? Result.FromSuccess()
+                            : Result.FromError(errResponse);
+                }
             }
             errResponse = await _feedbackService.SendContextualSuccessAsync($"Prefix set to {prefix}");
             return errResponse.IsSuccess
@@ -143,7 +151,7 @@ namespace DiscordBoostRoleBot
             string prefix = PrefixSetter.DefaultPrefix;
             if (guildId.HasValue)
             {
-                prefix = await Database.GetPrefix(guildId.Value);
+                prefix = await _databaseClass.GetPrefix(guildId.Value);
             }
 
             string replyString = prefix.Contains(' ') ? $"Prefix is \"{prefix}\"" : $"Prefix is {prefix}";
@@ -156,15 +164,18 @@ namespace DiscordBoostRoleBot
 
     internal class PrefixSetter : ICommandPrefixMatcher
     {
-        public const string OverridePrefix = "&DiscordBoostRoleBot&";
-        public const string DefaultPrefix = "&";
-        private readonly IMessageContext _context;
+        public const     string                OverridePrefix = "&DiscordBoostRoleBot&";
+        public const     string                DefaultPrefix  = "&";
+        private readonly IMessageContext       _context;
         private readonly ILogger<PrefixSetter> _log;
+        private readonly Database              _databaseClass;
 
-        public PrefixSetter(IMessageContext context, ILogger<PrefixSetter> log)
+
+        public PrefixSetter(IMessageContext context, ILogger<PrefixSetter> log, Database databaseClass)
         {
-            _context  = context;
-            _log = log;
+            _context            = context;
+            _log                = log;
+            _databaseClass = databaseClass;
         }
 
         public async ValueTask<Result<(bool Matches, int ContentStartIndex)>> MatchesPrefixAsync(string content, CancellationToken ct = new CancellationToken())
@@ -184,7 +195,7 @@ namespace DiscordBoostRoleBot
                 prefix = DefaultPrefix;
             } else
             {
-                prefix = await Database.GetPrefix(guildId.Value);
+                prefix = await _databaseClass.GetPrefix(guildId);
             }
             return Result<(bool Matches, int ContentStartIndex)>.FromSuccess(content.StartsWith(prefix) ? (true, prefix.Length) : (false, -1));
         }

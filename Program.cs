@@ -1,16 +1,13 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
 using System.Drawing;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Text.Encodings.Web;
-using Humanizer;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using Remora.Commands.Extensions;
 using Remora.Discord.API.Abstractions.Gateway.Commands;
 using Remora.Discord.Commands.Extensions;
@@ -20,37 +17,37 @@ using Remora.Results;
 using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Discord.API.Abstractions.Results;
-using Remora.Discord.API.Gateway.Events;
 using Remora.Discord.API.Objects;
-using Remora.Discord.Commands.Feedback.Messages;
-using Remora.Discord.Commands.Responders;
 using Remora.Discord.Gateway;
 using Remora.Discord.Gateway.Extensions;
 using Remora.Discord.Hosting.Options;
-using Remora.Discord.Rest.Extensions;
 using Remora.Extensions.Options.Immutable;
 using Remora.Rest.Core;
 using Remora.Rest.Results;
 using Serilog;
 using SixLabors.ImageSharp.Formats;
-using SQLitePCL;
-using Z.EntityFramework.Plus;
+
+// using DiscordDbContext = DiscordBoostRoleBot.Database.DiscordDbContextMongoDb;
 
 namespace DiscordBoostRoleBot
 {
     public class Program
     {
         private static IDiscordRestGuildAPI? _restGuildApi;
-        private static IDiscordRestUserAPI? _restUserApi;
-        public static bool IsInitialized() => _restGuildApi is not null;
+        private static IDiscordRestUserAPI?  _restUserApi;
+        public static  bool                  IsInitialized() => _restGuildApi is not null;
 
         public static ILogger<Program> log;
         public static HttpClient httpClient = new();
 
         public static ulong BotOwnerId = 0;
 
+        private static Database database;
+
         public static async Task Main(string[] args)
         {
+            // Setup MongoDB type mappings
+            RegisterClassMaps();
             //Build the service
             IHost? host = Host.CreateDefaultBuilder(args)
                               .ConfigureAppConfiguration((hostingContext, config) =>
@@ -65,9 +62,11 @@ namespace DiscordBoostRoleBot
                               .AddDiscordService(services =>
                                   services.GetRequiredService<IConfiguration>().GetValue<string>("Token")!)
                               .ConfigureServices(
-                                  (_, services) =>
+                                  (hostBuilderContext, services) =>
                                   {
                                       services
+                                          .Configure<MongoDbSettings>(hostBuilderContext.Configuration.GetSection("MongoDbSettings"))
+                                          .AddSingleton<Database>()
                                           .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
                                           .AddCommandTree()
                                           .WithCommandGroup<RoleCommands>()
@@ -94,9 +93,10 @@ namespace DiscordBoostRoleBot
                               .UseConsoleLifetime()
                               .Build();
             IServiceProvider? services = host.Services;
-            log = services.GetRequiredService<ILogger<Program>>();
+            log           = services.GetRequiredService<ILogger<Program>>();
             _restGuildApi = services.GetRequiredService<IDiscordRestGuildAPI>();
-            _restUserApi = services.GetRequiredService<IDiscordRestUserAPI>();
+            _restUserApi  = services.GetRequiredService<IDiscordRestUserAPI>();
+            database      = services.GetRequiredService<Database>();
             var configuration = services.GetRequiredService<IConfiguration>();
             BotOwnerId = configuration.GetValue<ulong>("BotOwnerId");
             Snowflake? debugServer = null;
@@ -130,7 +130,7 @@ namespace DiscordBoostRoleBot
         #if DEBUG
             Result updateSlash = await slashService.UpdateSlashCommandsAsync(guildID: debugServer).ConfigureAwait(false);
         #else
-                Result updateSlash = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
+            Result updateSlash = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
         #endif
             if (!updateSlash.IsSuccess)
             {
@@ -150,7 +150,6 @@ namespace DiscordBoostRoleBot
 
         internal static async Task<Result<IEnumerable<IGuildMember>>> GetGuildMembers(Snowflake guildId, IRole? role = null, bool checkIsBoosting = false, bool canBeMod = true, bool isBotOwner = false)
         {
-
             //Check role meets criteria to be added
             List<IGuildMember> membersList = new();
             Optional<Snowflake> lastGuildMemberSnowflake = default;
@@ -278,14 +277,14 @@ namespace DiscordBoostRoleBot
 
             IEnumerable<IGuildMember> guildBoosters = guildBoostersResult.Entity;
 #endif
-            await using Database.DiscordDbContext database = new();
+            // await using Database.DiscordDbContext database = new();
             // Get All Custom Roles Users have created for this guild
-            List<Database.RoleData> customRolesCreatedForGuild = await database.RolesCreated.Where(rc => rc.ServerId == serverId.Value).ToListAsync(cancellationToken: ct).ConfigureAwait(false);
+            List<Database.RoleData> customRolesCreatedForGuild = await database.GetRoles(guildId: serverId);
             // Get All Guild Roles that are allowed to make custom roles
             // (These are in addition to boosters and anyone with ManageRoles Permission, who can always make roles)
-            List<Snowflake>? allowedCreatorRolesSnowflakes = await database.ServerwideSettings.Where(ss => ss.ServerId == serverId.Value).Select(ss => ss.AllowedRolesSnowflakes).AsNoTracking().FirstOrDefaultAsync(cancellationToken: ct).ConfigureAwait(false);
+            List<Snowflake>? allowedCreatorRolesSnowflakes = await database.GetAllowedRoles(serverId);
             // Get Guild Member objects for all users that have a custom role in the database, using the store user id snowflakes 
-            Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId, customRolesCreatedForGuild.Select(rcfg => new Snowflake(rcfg.RoleUserId)));
+            Result<IEnumerable<IGuildMember>> members = await GetSpecifiedGuildMembers(serverId, customRolesCreatedForGuild.Select(rcfg => rcfg.RoleUserId));
             //TODO: Handle Error-ed Guild Member Objects
             // For each User with a role in this server, check if they are allowed to have a custom role
             foreach (IGuildMember member in members.Entity)
@@ -328,7 +327,7 @@ namespace DiscordBoostRoleBot
                     break;
                 }
                 //Not allowed to have, delete role
-                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(serverId, new(roleCreated.RoleId), ct: ct).ConfigureAwait(false);
+                Result delRoleResult = await _restGuildApi.DeleteGuildRoleAsync(serverId, roleCreated.RoleId, ct: ct).ConfigureAwait(false);
                 if (!delRoleResult.IsSuccess)
                 {
                     if (delRoleResult.Error is RestResultError<RestError> restError)
@@ -345,23 +344,9 @@ namespace DiscordBoostRoleBot
                         log.LogError("Failed to delete role {role} because {error}", roleCreated.RoleId, delRoleResult.Error.Message);
                     }
                 }
-                database.Remove(roleCreated);
+                // TODO: aggregate the roles and bulk remove them
+                await database.RemoveRoleFromDatabase(roleCreated.ServerId, roleCreated.RoleId);
                 peopleRemoved.Add(member);
-            }
-
-            int numRows;
-            try
-            {
-                numRows = await database.SaveChangesAsync(cancellationToken: ct).ConfigureAwait(false);
-            }
-            catch (Exception e)
-            {
-                log.LogCritical("Error Saving Database {error}", e);
-                throw;
-            }
-            if (numRows != peopleRemoved.Count && numRows-1 != peopleRemoved.Count)
-            {
-                log.LogWarning("Removed {numRows} from db but removed {numRoles} roles", numRows, peopleRemoved.Count);
             }
             return Result<List<IGuildMember>>.FromSuccess(peopleRemoved);
         }
@@ -412,7 +397,7 @@ namespace DiscordBoostRoleBot
 
                 Result<IRole> roleResult = await _restGuildApi.CreateGuildRoleAsync(guildID: serverId,
                         name: roleData.Name, colour: ColorTranslator.FromHtml(roleData.Color),
-                        icon: iconStream ?? default(Optional<Stream>), isHoisted: false, isMentionable: true, ct: ct)
+                        icon: iconStream ?? default(Optional<Stream?>), isHoisted: false, isMentionable: true, ct: ct)
                     .ConfigureAwait(false);
                 if (!roleResult.IsSuccess)
                 {
@@ -423,7 +408,7 @@ namespace DiscordBoostRoleBot
 
                 roleData.ImageHash = roleResult.Entity.Icon.Value?.Value;
                 IRole role = roleResult.Entity;
-                roleData.RoleId = role.ID.Value;
+                roleData.RoleId = role.ID;
                 Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: serverId,
                     userID: botOwnerGm.User.Value.ID, roleID: role.ID,
                     "User is boosting, role request via BoostRoleManager bot", ct: ct).ConfigureAwait(false);
@@ -569,7 +554,7 @@ namespace DiscordBoostRoleBot
                 }
 
                 log.LogInformation("Role not changed in {server}", serverId);
-                if (!botOwnerGm.Roles.Contains(new Snowflake(roleData.RoleId)))
+                if (!botOwnerGm.Roles.Contains(roleData.RoleId))
                 {
                     Result roleApplyResult = await _restGuildApi.AddGuildMemberRoleAsync(guildID: serverId,
                         userID: botOwnerGm.User.Value.ID, roleID: ownerRole.ID,
@@ -636,43 +621,70 @@ namespace DiscordBoostRoleBot
             }
         }
 
-        /// <summary>
-        /// Creates a generic application host builder.
-        /// </summary>
-        /// <param name="args">The arguments passed to the application.</param>
-        /// <returns>The host builder.</returns>
-        [Obsolete("don't use this until you fix it", true)]
-        private static IHostBuilder CreateHostBuilder(string[] args) => Host.CreateDefaultBuilder(args: args)
-            .AddDiscordService
-            (
-                services =>
-                {
-                    IConfiguration configuration = services.GetRequiredService<IConfiguration>();
+        internal static void RegisterClassMaps()
+        {
+            // Convert Snowflakes to ulongs
+            BsonSerializer.RegisterSerializer(new SnowflakeSerializer());
 
-                    return configuration.GetValue<string?>("REMORA_BOT_TOKEN") ??
-                           throw new InvalidOperationException
-                           (
-                               "No bot token has been provided. Set the REMORA_BOT_TOKEN environment variable to a " +
-                               "valid token."
-                           );
-                }
-            )
-            .ConfigureServices
-            (
-                (_, services) =>
+            BsonClassMap.RegisterClassMap<Database.RoleData>(cm =>
+            {
+                cm.AutoMap();
+                cm.MapMember(c => c.RoleId).SetElementName("role_id").SetIsRequired(true);
+                cm.MapMember(c => c.ServerId).SetElementName("server_id").SetIsRequired(true);
+                cm.MapMember(c => c.RoleUserId).SetElementName("role_user_id").SetIsRequired(true);
+                cm.MapMember(c => c.Color).SetElementName("color");
+                cm.MapMember(c => c.Name).SetElementName("name");
+                cm.MapMember(c => c.ImageUrl).SetElementName("image_url");
+                cm.MapMember(c => c.ImageHash).SetElementName("image_hash");
+                cm.SetIgnoreExtraElements(true);
+            });
+
+            BsonClassMap.RegisterClassMap<Database.ServerSettings>(cm =>
+            {
+                cm.AutoMap();
+                cm.MapMember(c => c.ServerId).SetElementName("server_id").SetIsRequired(true);
+                cm.MapMember(c => c.Prefix).SetElementName("prefix").SetDefaultValue('&');
+                cm.MapMember(c => c.AllowedRolesSnowflakes).SetElementName("allowed_roles_snowflakes")
+                  .SetDefaultValue(new List<Snowflake>()).SetIgnoreIfDefault(false).SetIgnoreIfNull(true);
+                cm.SetIgnoreExtraElements(true);
+            });
+
+            BsonClassMap.RegisterClassMap<Database.MessageReactorSettings>(cm =>
+            {
+                cm.AutoMap();
+                cm.MapMember(c => c.ServerId).SetElementName("server_id").SetIsRequired(true);
+                cm.MapMember(c => c.ChannelId).SetElementName("channel_id");
+                cm.MapMember(c => c.UserIds).SetElementName("user_ids");
+                cm.MapMember(c => c.Emotes).SetElementName("emotes");
+                cm.SetIgnoreExtraElements(true);
+            });
+        }
+
+        class SnowflakeSerializer : SerializerBase<Snowflake>
+        {
+            public override Snowflake Deserialize(BsonDeserializationContext context, BsonDeserializationArgs args)
+            {
+                switch (context.Reader.CurrentBsonType)
                 {
-                    services
-                        .AddDiscordCommands(true)
-                        .AddCommandTree()
-                        .WithCommandGroup<RoleCommands>();
+                    case BsonType.Null:
+                        context.Reader.ReadNull();
+                        return default;
+                    case BsonType.Decimal128:
+                        return new((ulong)context.Reader.ReadDecimal128());
+                    case BsonType.Int64:
+                        return new((ulong)context.Reader.ReadInt64());
+                    case BsonType.Int32:
+                        return new((ulong)context.Reader.ReadInt32());
+                    default:
+                        throw new FormatException($"Cannot deserialize a Snowflake from a {context.Reader.CurrentBsonType}");
                 }
-            )
-            .ConfigureLogging
-            (
-                c => c
-                    .AddConsole()
-                    .AddFilter("System.Net.Http.HttpClient.*.LogicalHandler", level: LogLevel.Warning)
-                    .AddFilter("System.Net.Http.HttpClient.*.ClientHandler", level: LogLevel.Warning)
-            );
+            }
+
+            public override void Serialize(BsonSerializationContext context, BsonSerializationArgs args,
+                Snowflake                                           value)
+            {
+                context.Writer.WriteDecimal128(value.Value);
+            }
+        }
     }
 }
