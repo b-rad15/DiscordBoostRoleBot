@@ -21,3 +21,6 @@ DiscordBoostRoleBot.service
 /secrets.env
 /discord-boost-role-bot.container
 SqliteDbBackup/
+/container-image-multiarch.sh
+/sync_files.ps1
+/sync_file_list.txt

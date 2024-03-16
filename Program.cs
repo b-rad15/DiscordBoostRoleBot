@@ -69,16 +69,15 @@ namespace DiscordBoostRoleBot
                                           .AddSingleton<Database>()
                                           .AddTransient<ICommandPrefixMatcher, PrefixSetter>()
                                           .AddCommandTree()
-                                          .WithCommandGroup<RoleCommands>()
+                                              .WithCommandGroup<RoleCommands>()
+                                              .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
+                                              .WithCommandGroup<CommandResponderConfigCommands>()
                                           .Finish()
                                           .AddResponder<AddReactionsToMediaArchiveMessageResponder>()
-                                          .AddCommandTree()
-                                          .WithCommandGroup<AddReactionsToMediaArchiveCommands>()
-                                          .Finish()
-                                          .AddCommandTree()
-                                          .WithCommandGroup<CommandResponderConfigCommands>()
-                                          .Finish()
                                           .AddHostedService<RolesRemoveService>()
+                                          // .AddResponder<BasicInteractionResponder>()
+                                          .AddPreparationErrorEvent<PreparationErrorEventResponder>()
+                                          .AddPostExecutionEvent<PostExecutionErrorResponder>()
                                           .Configure<DiscordGatewayClientOptions>(g =>
                                               g.Intents |= GatewayIntents.MessageContents)
                                           .AddDiscordCommands(true)
@@ -116,7 +115,7 @@ namespace DiscordBoostRoleBot
             SlashService slashService = services.GetRequiredService<SlashService>();
             if (args.Contains("--purge") && debugServer.HasValue){
                 Result purgeSlashCommands = await slashService
-                                                  .UpdateSlashCommandsAsync(guildID: debugServer, treeName: nameof(EmptyCommands))
+                                                  .UpdateSlashCommandsAsync(guildID: debugServer, treeName: nameof(EmptyCommands), CancellationToken.None)
                                                   .ConfigureAwait(false);
                 if (!purgeSlashCommands.IsSuccess)
                 {
@@ -126,22 +125,61 @@ namespace DiscordBoostRoleBot
                 {
                     log.LogInformation("Purge slash commands from {Reason}", debugServer.Value);
                 }
+#if RELEASE
+                purgeSlashCommands = await slashService
+                                                  .UpdateSlashCommandsAsync(treeName: nameof(EmptyCommands))
+                                                  .ConfigureAwait(false);
+                if (!purgeSlashCommands.IsSuccess)
+                {
+                    log.LogWarning("Failed to purge guild slash commands: {Reason}", purgeSlashCommands.Error?.Message);
+                } else
+                {
+                    log.LogInformation("Purge slash commands from {Reason}", debugServer.Value);
+                }
+#endif
             }
+            Snowflake? slashDebugServer =
         #if DEBUG
-            Result updateSlash = await slashService.UpdateSlashCommandsAsync(guildID: debugServer).ConfigureAwait(false);
+                debugServer;
         #else
-            Result updateSlash = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
+                null;
         #endif
-            if (!updateSlash.IsSuccess)
+        #if DEBUG
+            Result updateSlashGlobal = await slashService.UpdateSlashCommandsAsync(debugServer).ConfigureAwait(false);
+        #else
+            Result updateSlashGlobal = await slashService.UpdateSlashCommandsAsync().ConfigureAwait(false);
+        #endif
+            if (!updateSlashGlobal.IsSuccess)
             {
-                if(updateSlash.Error is RestResultError<RestError> restError)
-                    log.LogCritical("Failed to update slash commands: {code} {reason}", restError.Error.Code, restError.Error.Message);
+                if (updateSlashGlobal.Error is RestResultError<RestError> restError)
+                    log.LogCritical("Failed to update slash commands globally: {code} {reason}", restError.Error.Code, restError.Error.Message);
                 else
-                    log.LogCritical("Failed to update slash commands: {Reason}", updateSlash.Error?.Message);
-            }
-            else
+                    log.LogCritical("Failed to update slash commands globally: {Reason}", updateSlashGlobal.Error?.Message);
+            } else
             {
-                log.LogInformation("Successfully created commands {debugServerType}", debugServer is not null ? "on " + debugServer.Value : "global");
+                log.LogInformation("Successfully updated slash commands globally");
+            }
+            // Register for each slash command type
+            if (slashDebugServer is not null)
+            {
+                log.LogInformation("Creating commands on {debugServer}", slashDebugServer);
+            }
+            foreach (string? slashTree in new string?[]
+                     {
+                         
+                     })
+            {
+                Result updateSlash = await slashService.UpdateSlashCommandsAsync(guildID: slashDebugServer, treeName: slashTree).ConfigureAwait(false);
+                if (!updateSlash.IsSuccess)
+                {
+                    if(updateSlash.Error is RestResultError<RestError> restError)
+                        log.LogCritical("Failed to update slash commands for tree {treeName}: {code} {reason}", slashTree, restError.Error.Code, restError.Error.Message);
+                    else
+                        log.LogCritical("Failed to update slash commands for tree {treeName}: {Reason}", slashTree, updateSlash.Error?.Message);
+                } else
+                {
+                    log.LogInformation("Successfully updated slash commands for tree {treeName}", slashTree);
+                }
             }
             await host.RunAsync().ConfigureAwait(false);
 
@@ -207,7 +245,7 @@ namespace DiscordBoostRoleBot
                                 log.LogWarning("Guild {guild} is invalid: {message}", guildId, restError.Error.Message);
                                 break;
                             case DiscordError.UnknownGuild:
-                                log.LogWarning("Guild {guild} is unknown: {message}", guildId, restError.Error.Message);
+                                log.LogInformation("Guild {guild} is unknown: {message}", guildId, restError.Error.Message);
                                 break;
                             case DiscordError.UnknownMember:
                                 //TODO: Remove these from database

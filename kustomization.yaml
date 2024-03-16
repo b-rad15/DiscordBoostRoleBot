@@ -2,6 +2,9 @@ configMapGenerator:
   - name: boost-role-bot-config
     files:
     - appsettings.json
+secretGenerator:
+  - name: boost-role-bot-secrets
+    files:
     - secrets.json
 namespace: default
 resources:

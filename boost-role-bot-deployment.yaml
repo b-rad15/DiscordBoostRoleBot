@@ -1,4 +1,4 @@
-apiVersion: v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name:  discord-boost-role-bot
@@ -18,17 +18,28 @@ spec:
       labels:
         name:  discord-boost-role-bot
     spec:
+      # Add affinity to schedule on an arm64 node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - arm64
+                - amd64
       containers:
-      - image:  192.168.1.175:5000/discord-boost-role-bot:latest
+      - image:  192.168.1.175:5000/discord-boost-role:latest
         name:  discord-boost-role-bot
         imagePullPolicy: Always
         resources:
           requests:
-            cpu: "20m"
-            memory: "55M"
+            cpu: "200m"
+            memory: "250M"
           limits:
-            cpu: "100m"
-            memory: "100M"
+            cpu: "500m"
+            memory: "500M"
         # livenessProbe:
         #   httpGet:
         #     path: /_status/healthz
@@ -49,22 +60,28 @@ spec:
         #   name:  discord-boost-role-bot
         volumeMounts:
           # Mount only the appsettings.json file from the configmap
-          - name: boost-role-bot-config-volume
+          - name: boost-role-bot-appsettings-volume
             mountPath: /app/appsettings.json
             subPath: appsettings.json
-          # Mount only the secrets.json file from the configmap
-          - name: boost-role-bot-config-volume
+            readOnly: true
+          # Mount only the secrets.json file from the secrets file map
+          - name: boost-role-bot-secrets-volume
             mountPath: /app/secrets.json
             subPath: secrets.json
+            readOnly: true
       volumes:
-        - name: boost-role-bot-config-volume
+        - name: boost-role-bot-appsettings-volume
           configMap:
             name: boost-role-bot-config
             items:
               - key: appsettings.json
                 path: appsettings.json
+        - name: boost-role-bot-secrets-volume
+          secret:
+            secretName: boost-role-bot-secrets
+            items:
               - key: secrets.json
                 path: secrets.json
           
       restartPolicy: Always
-      imagePullPolicy: Always
+      terminationGracePeriodSeconds: 30

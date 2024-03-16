@@ -11,7 +11,6 @@ using Remora.Discord.Commands.Contexts;
 using Remora.Discord.Commands.Feedback.Messages;
 using Remora.Discord.Commands.Feedback.Services;
 using Remora.Discord.Extensions.Embeds;
-using Remora.Discord.Commands.Conditions;
 using Remora.Rest.Core;
 using Remora.Results;
 using System.Reflection;
@@ -187,11 +186,9 @@ Note: All users with server role change permissions and boosters are allowed to 
             return regexMatch.Success ? $"https://cdn.discordapp.com/emojis/{regexMatch.Groups["id"]}.{(regexMatch.Groups["animated"].Success ? "gif" : "png")}" : null;
         }
 
-        //[RequireContext(ChannelContext.Guild)]
-        // [RequireDiscordPermission(DiscordPermission.ManageRoles | DiscordPermission.Administrator)]
         [Command("make-role")]
-        [CommandType(type: ApplicationCommandType.ChatInput)]
-        [RequireContext(ChannelContext.Guild)]
+        [CommandType(ApplicationCommandType.ChatInput)]
+        [DiscordDefaultDMPermission(false)]
         [Description("Make a new role, attach an image to add it to the role")]
         public async Task<IResult> MakeNewRole([Description("Role Name")] string role_name,
             [Description("Color in #XxXxXx format or common name, use black or #000000 to keep current color")] string color = "#000000",
@@ -200,8 +197,8 @@ Note: All users with server role change permissions and boosters are allowed to 
             )
         {
             IGuildMember                    executorGuildMember;
-            IPartialChannel                        executionChannel;
-            IPartialGuild                           executionGuild;
+            IPartialChannel                 executionChannel;
+            IPartialGuild                   executionGuild;
             Result<IReadOnlyList<IMessage>> errResponse;
             Result                          deleteResponse;
             switch (_context)
@@ -266,7 +263,7 @@ Note: All users with server role change permissions and boosters are allowed to 
                 Result<IGuildMember> getPermsResult = await Program.AddGuildMemberPermissions(executorGuildMember, executionGuild.ID.Value);
                 if (!getPermsResult.IsSuccess)
                 {
-                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please evoke via slash command", options: new FeedbackMessageOptions
+                    errResponse = await _feedbackService.SendContextualErrorAsync("Could not determine User's permission, please invoke via slash command", options: new FeedbackMessageOptions
                     {
                         MessageFlags = MessageFlags.Ephemeral
                     }).ConfigureAwait(false);
@@ -318,6 +315,7 @@ Note: All users with server role change permissions and boosters are allowed to 
             //Check if you are not a mod and have more than one role
             if (!executorGuildMember.IsRoleModAdminOrOwner() && 0 < await _database.GetRoleCount(executionGuild.ID.Value, assign_to_member.User.Value.ID).ConfigureAwait(false))
             {
+                // TODO: Debug, doesn't seem to work
                 return await SendErrorReply("You are only allowed one booster role on this server").ConfigureAwait(false);
             }
 

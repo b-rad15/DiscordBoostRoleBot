@@ -6,7 +6,6 @@ using Remora.Discord.API.Abstractions.Objects;
 using Remora.Discord.API.Abstractions.Rest;
 using Remora.Discord.API.Objects;
 using Remora.Discord.Commands.Attributes;
-using Remora.Discord.Commands.Conditions;
 using Remora.Discord.Commands.Contexts;
 using Remora.Discord.Commands.Extensions;
 using Remora.Discord.Commands.Feedback.Messages;
@@ -34,7 +33,7 @@ namespace DiscordBoostRoleBot
             _databaseClass = databaseClass;
         }
 
-        [RequireContext(ChannelContext.Guild)]
+        [DiscordDefaultDMPermission(false)]
         [Command("set-prefix")]
         [CommandType(type: ApplicationCommandType.ChatInput)]
         [Description("Set the prefix for the bot")]

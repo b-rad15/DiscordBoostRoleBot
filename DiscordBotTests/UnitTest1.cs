@@ -1,5 +1,4 @@
 using Xunit;
-using System;
 using System.Text.RegularExpressions;
 
 namespace DiscordBotTests
