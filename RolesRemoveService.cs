@@ -55,7 +55,7 @@ namespace DiscordBoostRoleBot
         private async void DoWork(CancellationToken stoppingToken)
         {
             //Continue if another worker is already running
-            if (!_oneWorkerAtATime.Wait(0))
+            if (!await _oneWorkerAtATime.WaitAsync(0, stoppingToken))
                 return;
             _logger.LogInformation("{className} running at: {time}", GetType().Name, DateTimeOffset.Now);
             var roleDatas = await database.GetRoles();

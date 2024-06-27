@@ -24,3 +24,4 @@ SqliteDbBackup/
 /container-image-multiarch.sh
 /sync_files.ps1
 /sync_file_list.txt
+.idea
